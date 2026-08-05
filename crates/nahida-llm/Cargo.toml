@@ -1,0 +1,21 @@
+[package]
+name = "nahida-llm"
+version = "0.1.0"
+description = "Anthropic Messages API client: wire types, auth, SSE streaming."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+futures-util.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true
