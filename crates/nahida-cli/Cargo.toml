@@ -1,0 +1,25 @@
+[package]
+name = "nahida-cli"
+version = "0.1.0"
+description = "nahida's terminal front end."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "nahida"
+path = "src/main.rs"
+
+[dependencies]
+nahida-agent.workspace = true
+nahida-llm.workspace = true
+nahida-tools.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

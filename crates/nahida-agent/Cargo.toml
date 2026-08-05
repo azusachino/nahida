@@ -1,0 +1,23 @@
+[package]
+name = "nahida-agent"
+version = "0.1.0"
+description = "The agent loop: turns, tool dispatch, cancellation."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+nahida-llm.workspace = true
+
+async-trait.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# `net` for the fake provider's TcpListener; the rest come from the workspace set.
+tokio = { workspace = true, features = ["net"] }
+
+[lints]
+workspace = true

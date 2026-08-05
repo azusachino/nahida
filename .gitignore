@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+
+# asobi's project-local graph, if one is ever created here
+/.asobi/
+
+# never commit credentials
+.env
+.env.*
+!.env.example

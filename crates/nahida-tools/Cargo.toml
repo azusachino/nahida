@@ -1,0 +1,21 @@
+[package]
+name = "nahida-tools"
+version = "0.1.0"
+description = "The starting tool set: read, write, bash."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+nahida-agent.workspace = true
+
+async-trait.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

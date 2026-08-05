@@ -1,0 +1,45 @@
+[workspace]
+members = [
+  "crates/nahida-llm",
+  "crates/nahida-agent",
+  "crates/nahida-tools",
+  "crates/nahida-cli",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/azusachino/nahida"
+authors = ["haru <azusachino@proton.me>"]
+
+[workspace.dependencies]
+nahida-llm = { path = "crates/nahida-llm" }
+nahida-agent = { path = "crates/nahida-agent" }
+nahida-tools = { path = "crates/nahida-tools" }
+
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "process", "fs", "io-std", "io-util", "signal", "time"] }
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+# Fires on every `fn name(&self) -> &str` in a Tool impl. The trait declares the
+# borrowed return, so narrowing an impl to `&'static str` would not compile.
+unnecessary_literal_bound = "allow"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
