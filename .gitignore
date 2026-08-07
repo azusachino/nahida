@@ -1,6 +1,11 @@
 /target
 **/*.rs.bk
 
+# tutorial site build/tooling artifacts (docs/ is a self-contained
+# mise+uv-managed MkDocs project, kept apart from the Rust toolchain above)
+/docs/site
+/docs/.venv
+
 # asobi's project-local graph, if one is ever created here
 /.asobi/
 

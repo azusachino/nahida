@@ -1,0 +1,74 @@
+site_name: nahida — 0 to hero
+site_description: A concept-by-concept walkthrough of nahida's own code, in the order AGENTS.md's concept map lists them.
+repo_url: https://github.com/azusachino/nahida
+repo_name: azusachino/nahida
+docs_dir: pages
+
+validation:
+  links:
+    absolute_links: ignore
+    unrecognized_links: ignore
+
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/robot-outline
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - admonition
+  - attr_list
+  - tables
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.details
+  - pymdownx.superfences
+
+nav:
+  - Start here: index.md
+  - "0. Why nahida exists": 00-why-nahida.md
+  - "1. The provider layer": 01-the-provider-layer.md
+  - "2. Streaming and accumulation": 02-streaming-and-accumulation.md
+  - "3. The loop": 03-the-loop.md
+  - "4. Tools": 04-tools.md
+  - "5. Sandboxing": 05-sandboxing.md
+  - "6. Testing the loop": 06-testing-the-loop.md
+  - "7. Context compaction": 07-context-compaction.md
+  - "8. Permission gating": 08-permission-gating.md
+  - "9. Evals": 09-evals.md
+  - "10. The CLI": 10-the-cli.md
+  - "What's next": 11-whats-next.md
