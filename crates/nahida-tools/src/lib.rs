@@ -9,6 +9,7 @@
 //! untrusted input.
 
 pub mod bash;
+pub mod os_sandbox;
 pub mod read;
 pub mod sandbox;
 pub mod write;
@@ -18,6 +19,7 @@ use std::sync::Arc;
 use nahida_agent::Tool;
 
 pub use bash::Bash;
+pub use os_sandbox::confine_writes;
 pub use read::Read;
 pub use sandbox::Sandbox;
 pub use write::Write;

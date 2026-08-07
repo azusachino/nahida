@@ -3,8 +3,8 @@
 Everything in `AGENTS.md`'s concept map is now "done" except prompt caching
 (still "partial" — it works on first-party Anthropic and silently no-ops on
 any `Compat`-dialect gateway, which is how the dialect system in chapter 1 is
-supposed to behave, not a bug to fix). Reliability is done too, as of the
-most recent round; two gaps remain, one of them a real one.
+supposed to behave, not a bug to fix) and macOS sandboxing (deliberately
+deferred — see below).
 
 ## Shipped: retry with backoff, reactive overflow recovery
 
@@ -31,7 +31,7 @@ that error propagates for real — recovery is a safety net, not a loop.
 Both are pure hardening: same observable behavior on success, fewer ways a
 transient blip or a misjudged `compact_at` ends the whole session.
 
-## One gap still open: real OS-level sandboxing
+## Shipped: OS-level write confinement (Landlock, Linux only)
 
 Found by reading a second reference, `refs/grok-build` (`xai-org/grok-build`)
 — xAI's `grok` CLI, the first *Rust* reference in the catalog, which makes it
@@ -40,15 +40,39 @@ kernel-enforced isolation (Landlock on Linux, Seatbelt on macOS, via the
 `nono` crate) once at process startup, plus per-subprocess seccomp network
 blocking.
 
-`nahida` has nothing like this. [Sandboxing](05-sandboxing.md) only
-constrains paths passed to `read`/`write`; `bash` just gets `current_dir()`
-set to the workspace root and nothing else. [Permission gating](08-permission-gating.md)
-puts a human in front of every `bash` call, but an *approved* command can
-still read `~/.ssh/id_ed25519` or reach the network — gating and OS-level
-confinement are complementary, not substitutes. Worth its own issue if
-pursued; it's a genuinely different scope than anything built so far (a new
-dependency, applied at `nahida-cli` startup, not something `nahida-tools`
-can do alone).
+`nono` turned out not to be something to depend on blindly, though — the
+ecosystem is three separately-versioned crates (`nono`, `nono-cli`,
+`nono-rs`) with overlapping names, and `nono-rs`'s own docs call it "early
+alpha... not undergone comprehensive security audit." Worse, macOS's half of
+the story is actively risky, not just deprecated: `sandbox-exec` has no
+documented replacement for headless process sandboxing, and there's a
+current, real bug where a Seatbelt sandbox can block the
+`com.apple.SystemConfiguration.configd` Mach service — which crashes any
+Rust process using the `system-configuration` crate, which `reqwest`'s
+default macOS features pull in. `nahida-llm` uses `reqwest` for every API
+call. A naive Seatbelt sandbox risks breaking the exact thing the agent
+needs to function, on the platform this project is actually developed and
+run on.
+
+So the shipped scope is narrower than "cross-platform OS sandboxing":
+`nahida_tools::confine_writes` (`nahida-tools/src/os_sandbox.rs`), Linux
+only, via the mature `landlock` crate directly (no `nono`), applied once at
+`nahida-cli` startup. It denies write/create/delete/rename access anywhere
+outside the workspace root — for this process and every child `bash`
+spawns, with no API to lift it afterward — while leaving reads and execution
+completely unrestricted. That's a scoped decision: confining reads too would
+need a comprehensive allowlist of whatever paths the host distro's dynamic
+linker, DNS resolution, and TLS trust store need, which varies enough
+between distros (notably Nix, where almost everything lives under
+content-addressed `/nix/store` paths rather than a fixed `/usr` layout) that
+getting it wrong would break `bash` outright.
+
+What this does *not* cover: reading a secret the model was never supposed to
+see, or exfiltrating it over the network — [permission gating](08-permission-gating.md)
+is the layer meant to catch a call before it runs at all, and gating plus
+write confinement are complementary, not substitutes for each other. And
+macOS gets none of this yet; it stays on gating alone until Seatbelt has a
+real answer, or the `nono`/similar ecosystem matures enough to depend on.
 
 ## The tool-set roadmap that's already written down
 

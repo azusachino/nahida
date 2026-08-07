@@ -14,6 +14,13 @@ async-trait.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 
+# OS-level write confinement (Landlock) -- Linux only. See os_sandbox.rs for
+# why macOS has no equivalent: Seatbelt is deprecated with no documented
+# replacement for headless sandboxing, and known to break reqwest's default
+# macOS proxy detection.
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 

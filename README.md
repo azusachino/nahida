@@ -92,8 +92,15 @@ first — every call needs a `y`/`N` before it runs — but that gate is
 all-or-nothing (the harness only sees an opaque command string, so it can't
 tell a `grep` from a `git push --force` yet) and only exists when stdin is a
 terminal: a scripted or piped invocation runs ungated rather than hanging on a
-prompt no one can answer. Point `--root` at a repo you can afford to have
-edited regardless.
+prompt no one can answer.
+
+On Linux, writes outside `--root` are also denied at the kernel level
+(Landlock) — not just by the confirmation prompt — for this process and every
+child `bash` spawns, applied once at startup with no way to lift it. Reads
+stay unrestricted (see `nahida-tools/src/os_sandbox.rs` for why), and macOS
+has no equivalent yet — `sandbox-exec` is deprecated with no real replacement
+for headless sandboxing and is known to break `reqwest`'s macOS proxy
+detection. Point `--root` at a repo you can afford to have edited regardless.
 
 ## Reading the code
 
