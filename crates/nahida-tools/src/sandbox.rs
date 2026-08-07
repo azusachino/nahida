@@ -71,7 +71,14 @@ impl Sandbox {
         }
 
         let tail = joined.strip_prefix(existing).unwrap_or(Path::new(""));
-        Ok(real.join(tail))
+        // `real.join(tail)` for an empty `tail` still appends a trailing
+        // separator (a `PathBuf::push` quirk, not a no-op) — harmless for a
+        // directory, but turns a plain file's path into one that looks like
+        // a directory to `open(2)`, which then fails with `ENOTDIR`. This is
+        // exactly the case where `candidate` already exists in full (the
+        // overwhelmingly common case for `read`/`edit`), so it is not an
+        // edge case worth leaving in.
+        if tail.as_os_str().is_empty() { Ok(real) } else { Ok(real.join(tail)) }
     }
 
     /// A path as it should appear in a message back to the model: relative to the
@@ -117,5 +124,22 @@ mod tests {
     fn rejects_empty_path() {
         let (_dir, sb) = sandbox();
         assert!(sb.resolve("   ").is_err());
+    }
+
+    /// A regression test for a real bug: when `candidate` already exists in
+    /// full — the common case for `read`/`edit`, not an edge case — the tail
+    /// left after `strip_prefix` is empty, and `real.join("")` still adds a
+    /// trailing separator rather than being a no-op. That turns a plain
+    /// file's path into one `open(2)` reads as "must be a directory" and
+    /// refuses with `ENOTDIR`.
+    #[test]
+    fn resolving_a_path_that_already_exists_does_not_add_a_trailing_slash() {
+        let (dir, sb) = sandbox();
+        std::fs::write(dir.path().join("f.txt"), "hi").expect("seed");
+
+        let p = sb.resolve("f.txt").expect("resolves");
+
+        assert!(!p.to_string_lossy().ends_with('/'), "got {p:?}");
+        std::fs::read_to_string(&p).expect("the resolved path must actually open as a file");
     }
 }

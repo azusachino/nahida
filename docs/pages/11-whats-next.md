@@ -74,13 +74,32 @@ write confinement are complementary, not substitutes for each other. And
 macOS gets none of this yet; it stays on gating alone until Seatbelt has a
 real answer, or the `nono`/similar ecosystem matures enough to depend on.
 
-## The tool-set roadmap that's already written down
+## Shipped: a staleness-checked `edit`
 
-`crates/nahida-tools/src/lib.rs`'s own doc comment names what's missing from
-the current three tools (`read`, `write`, `bash`): `grep`, `glob`, a
-staleness-checked `edit` (so an edit fails loudly if the file changed since
-it was last read, instead of blindly overwriting like `write` does today),
-and a *gated* `git push`.
+`write.rs`'s own doc comment used to name this as "the natural first
+extension" — a blind whole-file overwrite has no way to know whether what
+it's replacing is what the model actually saw. `Edit`
+(`crates/nahida-tools/src/edit.rs`) is a targeted `old_string` →
+`new_string` replacement instead, and the staleness guarantee falls out of
+that for free: if the file changed enough that `old_string` no longer
+matches — or now matches more than once — the edit refuses rather than
+guessing, so it's a stronger check than snapshotting "the file looked like X
+when I read it" would give, at no extra implementation cost.
+
+Building it surfaced a real bug in [`Sandbox::resolve`](05-sandboxing.md),
+not a new one it introduced: resolving a path that *already exists in full*
+— the ordinary case for both `read` and `edit`, not an edge case — left an
+empty `tail` after `strip_prefix`, and `real.join(tail)` on an empty tail
+still adds a trailing separator rather than being a no-op. That turns a
+plain file's path into one `open(2)` refuses with `ENOTDIR`. No prior test
+had ever resolved a path that already fully existed as a file — `edit`'s
+tests were the first to, which is exactly the value of writing the tests
+before trusting the code: this failed loudly rather than silently.
+
+## The tool-set roadmap that's still open
+
+`crates/nahida-tools/src/lib.rs`'s own doc comment names what's left:
+`grep`, `glob`, and a *gated* `git push`.
 
 That last one connects directly to [chapter 8](08-permission-gating.md):
 `bash`'s permission gating is all-or-nothing today specifically because the

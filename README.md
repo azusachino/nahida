@@ -83,9 +83,11 @@ Ctrl-C interrupts the current turn and keeps the session; twice quits.
 
 ## What it can do
 
-Three tools — `read`, `write`, and `bash` — which together let it look at a
-project, change it, and check its own work. Every path is confined to the
-workspace root.
+Four tools — `read`, `write`, `edit`, and `bash` — which together let it look
+at a project, change it precisely or wholesale, and check its own work.
+`edit` replaces exact text rather than the whole file, and refuses instead of
+guessing if what it expected to find has changed. Every path is confined to
+the workspace root.
 
 `bash` runs with this process's privileges. In an interactive session it asks
 first — every call needs a `y`/`N` before it runs — but that gate is

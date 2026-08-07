@@ -28,12 +28,16 @@ tool touches a filesystem or a `bash` tool spawns a process.
 - **`spec()` is where a `Tool` becomes a `ToolSpec`** — the wire type from
   chapter 1 — turning the trait into exactly what gets sent in
   `Request.tools`.
-- **The starting set is three tools on purpose**: `read`, `write`, `bash`,
-  because together they close the loop — look at the workspace, change it,
-  check the work. `nahida-tools/src/lib.rs`'s own comment calls out what's
-  *not* here yet (grep, glob, a staleness-checked edit, a gated `git push`)
-  as additions to a working thing, not prerequisites — see
-  [what's next](11-whats-next.md).
+- **The set is four tools on purpose**: `read`, `write`, `edit`, `bash`,
+  because together they close the loop — look at the workspace, change it
+  precisely or wholesale, check the work. `edit` is the interesting one:
+  it's a targeted `old_string` → `new_string` replacement rather than a
+  whole-file overwrite, and the staleness check `write.rs` used to call out
+  as missing falls out of that for free — if `old_string` no longer matches
+  (or now matches more than once), the edit refuses instead of guessing.
+  `nahida-tools/src/lib.rs`'s own comment calls out what's still *not* here
+  (`grep`, `glob`, a gated `git push`) as additions to a working thing, not
+  prerequisites — see [what's next](11-whats-next.md).
 
 Next: [sandboxing](05-sandboxing.md) — every one of these tools receives a
 path from the model, and a path from the model is untrusted input.

@@ -51,6 +51,7 @@ Where each idea lives, and which are still to come. Tracked as
 | Provider abstraction, streaming, dialects | `nahida-llm` | done |
 | The agent loop, `stop_reason`, cancellation | `nahida-agent/agent.rs` | done |
 | Tool schemas and parallel dispatch | `nahida-agent/tool.rs`, `nahida-tools` | done |
+| Staleness-checked edit (targeted replacement, not a blind overwrite) | `nahida-tools/src/edit.rs` | done |
 | Path confinement | `nahida-tools/sandbox.rs` | done |
 | Prompt caching (one breakpoint) | `Agent::system` | partial |
 | Loop regression tests vs a fake provider | `nahida-agent/tests/` | done |
