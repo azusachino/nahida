@@ -90,6 +90,16 @@ impl Renderer {
                 }
             }
 
+            AgentEvent::Compacting => {
+                self.newline_if_needed();
+                println!("{DIM}▸ compacting context…{RESET}");
+            }
+
+            AgentEvent::Compacted => {
+                self.newline_if_needed();
+                println!("{DIM}  ✓ context compacted{RESET}");
+            }
+
             AgentEvent::Done { .. } => self.newline_if_needed(),
         }
     }

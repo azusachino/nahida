@@ -38,6 +38,12 @@ struct Cli {
     #[arg(long, default_value_t = 32)]
     max_turns: u32,
 
+    /// Summarize and replace the transcript once a turn's prompt reaches this
+    /// many tokens. Off by default — the right value depends on the model's
+    /// context window, which varies by provider.
+    #[arg(long)]
+    compact_at: Option<u64>,
+
     /// Cap on output tokens per turn. Defaults to the provider's default.
     #[arg(long)]
     max_tokens: Option<u32>,
@@ -75,7 +81,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    let agent = Agent::new(client)
+    let mut agent = Agent::new(client)
         .model(&model)
         .system(include_str!("prompt.md"))
         .tools(nahida_tools::default_set(&sandbox))
@@ -83,6 +89,9 @@ async fn main() -> Result<()> {
         .max_turns(cli.max_turns)
         .max_tokens(max_tokens)
         .show_thinking(cli.thinking);
+    if let Some(threshold) = cli.compact_at {
+        agent = agent.compact_at(threshold);
+    }
 
     let cancel = Cancel::new();
     {

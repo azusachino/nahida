@@ -32,6 +32,11 @@ pub enum AgentEvent {
     TurnEnd {
         usage: Usage,
     },
+    /// The transcript is about to be summarized and replaced. Fires only
+    /// between turns, never mid-tool-exchange.
+    Compacting,
+    /// The replacement landed; `transcript` is now the summary.
+    Compacted,
     Done {
         stop_reason: Option<StopReason>,
     },
