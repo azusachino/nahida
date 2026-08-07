@@ -126,7 +126,7 @@ pub fn format_usage(usage: &Usage) -> String {
 }
 
 /// A one-line gist of a tool's input, for the call line.
-fn summarize(input: &serde_json::Value) -> String {
+pub(crate) fn summarize(input: &serde_json::Value) -> String {
     for key in ["path", "command"] {
         if let Some(v) = input.get(key).and_then(serde_json::Value::as_str) {
             return truncate(v.trim(), 100);

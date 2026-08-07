@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use nahida_agent::{Agent, AgentError, Cancel, Tool, ToolOutcome};
+use nahida_agent::{Agent, AgentError, Cancel, Confirm, Tool, ToolOutcome};
 use nahida_llm::{ContentBlock, Message, StopReason};
 use support::{FakeProvider, refusal_turn, text_turn, tool_use_turn, transcript_shape};
 
@@ -20,11 +20,22 @@ struct Spy {
     name: &'static str,
     calls: Arc<Mutex<Vec<serde_json::Value>>>,
     count: Arc<AtomicUsize>,
+    gated: bool,
 }
 
 impl Spy {
     fn new(name: &'static str) -> Self {
-        Self { name, calls: Arc::new(Mutex::new(Vec::new())), count: Arc::new(AtomicUsize::new(0)) }
+        Self {
+            name,
+            calls: Arc::new(Mutex::new(Vec::new())),
+            count: Arc::new(AtomicUsize::new(0)),
+            gated: false,
+        }
+    }
+
+    /// A `Spy` that reports `requires_confirmation() == true`.
+    fn gated(name: &'static str) -> Self {
+        Self { gated: true, ..Self::new(name) }
     }
 }
 
@@ -42,10 +53,24 @@ impl Tool for Spy {
         serde_json::json!({"type": "object", "properties": {}, "additionalProperties": true})
     }
 
+    fn requires_confirmation(&self, _input: &serde_json::Value) -> bool {
+        self.gated
+    }
+
     async fn call(&self, input: serde_json::Value) -> ToolOutcome {
         self.calls.lock().expect("lock").push(input);
         self.count.fetch_add(1, Ordering::Relaxed);
         ToolOutcome::ok(format!("{} ran", self.name))
+    }
+}
+
+/// Approves or denies every call the same way, regardless of tool or input.
+struct FixedConfirm(bool);
+
+#[async_trait]
+impl Confirm for FixedConfirm {
+    async fn ask(&self, _tool: &str, _input: &serde_json::Value) -> bool {
+        self.0
     }
 }
 
@@ -82,6 +107,70 @@ async fn runs_a_tool_then_finishes() {
     // Usage accumulates across turns rather than reporting only the last.
     assert_eq!(outcome.usage.input_tokens, 20);
     assert_eq!(outcome.usage.output_tokens, 10);
+}
+
+#[tokio::test]
+async fn a_denied_call_returns_an_error_result_without_running() {
+    let provider = FakeProvider::start(vec![
+        tool_use_turn("", &[("t1", "spy", serde_json::json!({}))]),
+        text_turn("ok"),
+    ])
+    .await;
+
+    let spy = Arc::new(Spy::gated("spy"));
+    let count = Arc::clone(&spy.count);
+    let agent = agent(&provider, vec![spy]).confirm(Arc::new(FixedConfirm(false)));
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    agent.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect("loop completes");
+
+    assert_eq!(count.load(Ordering::Relaxed), 0, "a denied call must never actually run");
+
+    // Still a result, not a dropped one — a wedged conversation is worse
+    // than an error the model can see and react to.
+    let requests = provider.requests();
+    let result = &requests[1]["messages"][2]["content"][0];
+    assert_eq!(result["tool_use_id"], "t1");
+    assert_eq!(result["is_error"], true);
+    assert!(result["content"].as_str().expect("string").contains("not approved"), "got {result:?}");
+}
+
+#[tokio::test]
+async fn an_approved_gated_call_runs_normally() {
+    let provider = FakeProvider::start(vec![
+        tool_use_turn("", &[("t1", "spy", serde_json::json!({}))]),
+        text_turn("ok"),
+    ])
+    .await;
+
+    let spy = Arc::new(Spy::gated("spy"));
+    let count = Arc::clone(&spy.count);
+    let agent = agent(&provider, vec![spy]).confirm(Arc::new(FixedConfirm(true)));
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    agent.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect("loop completes");
+
+    assert_eq!(count.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn a_gated_call_runs_unconditionally_with_no_confirm_handler_registered() {
+    let provider = FakeProvider::start(vec![
+        tool_use_turn("", &[("t1", "spy", serde_json::json!({}))]),
+        text_turn("ok"),
+    ])
+    .await;
+
+    let spy = Arc::new(Spy::gated("spy"));
+    let count = Arc::clone(&spy.count);
+    // No `.confirm(...)` — gating is opt-in, so a flagged call runs exactly
+    // as it did before gating existed.
+    let agent = agent(&provider, vec![spy]);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    agent.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect("loop completes");
+
+    assert_eq!(count.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test]

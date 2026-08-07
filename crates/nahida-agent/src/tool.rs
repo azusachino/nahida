@@ -39,6 +39,15 @@ pub trait Tool: Send + Sync {
 
     async fn call(&self, input: serde_json::Value) -> ToolOutcome;
 
+    /// Whether this specific call should be confirmed by a human before it
+    /// runs. Checked against the [`crate::Confirm`] handler registered on the
+    /// agent, if any. A provided default of `false` means existing and future
+    /// tools opt into gating explicitly rather than needing every `impl Tool`
+    /// updated when this method was added.
+    fn requires_confirmation(&self, _input: &serde_json::Value) -> bool {
+        false
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: self.name().to_string(),

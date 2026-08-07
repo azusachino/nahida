@@ -62,6 +62,13 @@ impl Tool for Bash {
         })
     }
 
+    /// Always gated: the harness sees only an opaque command string, so it
+    /// cannot tell a `grep` from a `git push --force` — see the module doc.
+    /// All-or-nothing until dangerous actions get split into their own tools.
+    fn requires_confirmation(&self, _input: &serde_json::Value) -> bool {
+        true
+    }
+
     async fn call(&self, input: serde_json::Value) -> ToolOutcome {
         let command = match required_str(&input, "command") {
             Ok(c) => c,

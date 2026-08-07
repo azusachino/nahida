@@ -4,12 +4,15 @@
 //! user: render progress as it happens, and make Ctrl-C stop the agent instead of
 //! killing the process mid-turn.
 
+mod confirm;
 mod render;
 
 use std::io::{IsTerminal as _, Write as _};
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use clap::Parser;
+use confirm::TerminalConfirm;
 use nahida_agent::{Agent, AgentError, Cancel};
 use nahida_llm::{Client, ContentBlock, Effort, Message};
 use nahida_tools::Sandbox;
@@ -91,6 +94,12 @@ async fn main() -> Result<()> {
         .show_thinking(cli.thinking);
     if let Some(threshold) = cli.compact_at {
         agent = agent.compact_at(threshold);
+    }
+    // With no one to answer a prompt, a scripted or piped invocation would
+    // hang on a read that never comes — so gating only turns on when a human
+    // is actually attached.
+    if std::io::stdin().is_terminal() {
+        agent = agent.confirm(Arc::new(TerminalConfirm));
     }
 
     let cancel = Cancel::new();
