@@ -81,6 +81,16 @@ async fn main() -> Result<()> {
     let sandbox = Sandbox::new(&cli.root)
         .with_context(|| format!("workspace root `{}` is not usable", cli.root.display()))?;
 
+    // Kernel-enforced (Landlock, Linux only): denies writes outside the
+    // workspace root for this process and every child bash spawns, with no
+    // API to lift it afterward. Best-effort on purpose — an unrelated kernel
+    // config choice (old kernel, Landlock disabled, non-Linux) should never
+    // stop the agent from starting; it just means this layer isn't there and
+    // permission gating is carrying the whole weight of confining `bash`.
+    if let Err(e) = nahida_tools::confine_writes(sandbox.root(), |msg| eprintln!("{msg}")) {
+        eprintln!("warning: OS-level write confinement not applied: {e}");
+    }
+
     // The credential error is the one a new user hits first, so let it speak for
     // itself instead of wrapping it in context.
     let client = Client::from_env()?;
