@@ -69,6 +69,9 @@ pub struct Agent {
     thinking: Option<Thinking>,
     compact_threshold: Option<u64>,
     confirm: Option<Arc<dyn Confirm>>,
+    max_retries: u32,
+    retry_base_delay_ms: u64,
+    recover_from_overflow: bool,
 }
 
 impl Agent {
@@ -87,6 +90,13 @@ impl Agent {
             thinking: None,
             compact_threshold: None,
             confirm: None,
+            // On by default, unlike compact_at/confirm: neither changes what
+            // the agent does, only whether a transient failure or a real
+            // overflow is survivable. There is no scenario where the old
+            // "one failure ends the run" behavior is what anyone wants.
+            max_retries: 3,
+            retry_base_delay_ms: 500,
+            recover_from_overflow: true,
         }
     }
 
@@ -156,6 +166,35 @@ impl Agent {
         self
     }
 
+    /// Bound on retries for a transient failure (see
+    /// [`nahida_llm::Error::is_retryable`]) — rate limits, server overload,
+    /// transport errors. `0` disables retrying. Each attempt waits
+    /// `retry_base_delay_ms * 2^(attempt-1)`.
+    #[must_use]
+    pub fn max_retries(mut self, retries: u32) -> Self {
+        self.max_retries = retries;
+        self
+    }
+
+    #[must_use]
+    pub fn retry_base_delay_ms(mut self, ms: u64) -> Self {
+        self.retry_base_delay_ms = ms;
+        self
+    }
+
+    /// On a real context-overflow error (see
+    /// [`nahida_llm::Error::is_context_overflow`]), compact the transcript
+    /// and retry the same turn once, rather than ending the run. This is a
+    /// safety net independent of [`Agent::compact_at`] — it needs no
+    /// threshold, since a real overflow is its own signal, and it fires
+    /// exactly once per turn: if the retried turn overflows too, the error
+    /// propagates for real.
+    #[must_use]
+    pub fn recover_from_overflow(mut self, recover: bool) -> Self {
+        self.recover_from_overflow = recover;
+        self
+    }
+
     /// Ask for summarized reasoning. Without this, thinking blocks arrive empty
     /// and a long think looks like the process has hung.
     #[must_use]
@@ -210,7 +249,20 @@ impl Agent {
             }
 
             sink(AgentEvent::TurnStart { turn });
-            let response = self.one_turn(transcript, cancel, sink).await?;
+            let response = match self.one_turn(transcript, cancel, sink).await {
+                Ok(response) => response,
+                // A real overflow, not a guess: compact and retry this exact
+                // turn once. If it overflows again, that error propagates —
+                // recovery gets one attempt, never a loop of its own.
+                Err(AgentError::Llm(e))
+                    if self.recover_from_overflow && e.is_context_overflow() =>
+                {
+                    let cost = self.compact(transcript, cancel, sink).await?;
+                    total.add(cost);
+                    self.one_turn(transcript, cancel, sink).await?
+                }
+                Err(e) => return Err(e),
+            };
             total.add(response.usage);
             last_prompt_tokens = response.usage.prompt_tokens();
             sink(AgentEvent::TurnEnd { usage: response.usage });
@@ -328,11 +380,49 @@ impl Agent {
         Ok(response.usage)
     }
 
-    /// Stream one request, forwarding text/thinking deltas to `sink` while
-    /// folding the events into a complete [`Response`]. Shared by
-    /// [`Agent::one_turn`] and [`Agent::compact`] — the only difference
-    /// between a turn and a compaction call is what `Request` gets built.
+    /// Stream one request, retrying on a transient failure with exponential
+    /// backoff. Shared by [`Agent::one_turn`] and [`Agent::compact`] — the
+    /// only difference between a turn and a compaction call is what
+    /// `Request` gets built.
+    ///
+    /// Retrying means resending the whole request from scratch — there is no
+    /// way to resume a broken stream mid-way — so any text or thinking
+    /// already forwarded to `sink` from a failed attempt stays visible; a
+    /// fresh attempt's deltas are appended after it rather than replacing it.
+    /// That's honest about what happened rather than silently rewinding
+    /// output the caller already rendered.
     async fn stream_request(
+        &self,
+        request: &Request,
+        cancel: &Cancel,
+        sink: &mut dyn FnMut(AgentEvent),
+    ) -> Result<Response, AgentError> {
+        let mut attempt = 0u32;
+        loop {
+            match self.stream_request_once(request, cancel, sink).await {
+                Ok(response) => return Ok(response),
+                Err(AgentError::Llm(e)) if attempt < self.max_retries && e.is_retryable() => {
+                    attempt += 1;
+                    let delay_ms = self.retry_base_delay_ms * 2u64.pow(attempt - 1);
+                    sink(AgentEvent::Retrying {
+                        attempt,
+                        max_attempts: self.max_retries,
+                        delay_ms,
+                        reason: e.to_string(),
+                    });
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    if cancel.is_cancelled() {
+                        return Err(AgentError::Cancelled);
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// One attempt at a single request — the part [`Agent::stream_request`]
+    /// wraps with retry, so this can only ever try once.
+    async fn stream_request_once(
         &self,
         request: &Request,
         cancel: &Cancel,

@@ -57,6 +57,8 @@ Where each idea lives, and which are still to come. Tracked as
 | Context compaction | `Agent::compact`, opt-in via `compact_at` | done |
 | Permission gating | `Tool::requires_confirmation`, `Agent::confirm` | done (bash only, all-or-nothing) |
 | Evals | `crates/nahida-cli/tests/evals.rs`, `make eval` | done (2 tasks) |
+| Reliability: retry with backoff, reactive overflow recovery | `Agent::max_retries`, `Agent::recover_from_overflow` | done |
+| OS-level sandboxing (Landlock/Seatbelt) | — | to do (see `docs/pages/11-whats-next.md`) |
 
 ## Testing the loop
 

@@ -70,6 +70,11 @@ nahida [PROMPT...]
       --max-tokens <N>      output cap per turn
       --compact-at <N>      summarize the transcript once a turn's prompt
                              reaches N tokens                        [default: off]
+      --max-retries <N>     retries for a rate limit/server/transport
+                             error, with backoff                     [default: 3]
+      --retry-base-delay-ms <N>  base backoff delay; doubles per retry [default: 500]
+      --no-overflow-recovery    disable the one-shot compact-and-retry
+                             on a real context-overflow error
       --thinking            stream summarized reasoning
   -v, --verbose             turn boundaries, token usage, tool results
 ```

@@ -3,39 +3,52 @@
 Everything in `AGENTS.md`'s concept map is now "done" except prompt caching
 (still "partial" — it works on first-party Anthropic and silently no-ops on
 any `Compat`-dialect gateway, which is how the dialect system in chapter 1 is
-supposed to behave, not a bug to fix). Two gaps surfaced by comparing this
-project against a much larger one, plus the tool-set roadmap this project's
-own code already names.
+supposed to behave, not a bug to fix). Reliability is done too, as of the
+most recent round; two gaps remain, one of them a real one.
 
-## Two gaps, found by reading `refs/pi`
+## Shipped: retry with backoff, reactive overflow recovery
 
-`refs/pi` (`earendil-works/pi`) is a production-grade agent toolkit with the
-same shape as `nahida` — a provider layer, a loop, tools, a terminal front
-end — but thirty-plus provider adapters, session persistence, telemetry, a
-client/server protocol. Almost none of that is worth copying into `nahida`;
-copying it would be exactly the mistake [chapter 0](00-why-nahida.md) is
-about not making. Two pieces of it *are* worth borrowing as concepts, though,
-because they're gaps `nahida` genuinely has:
+Both came from reading `refs/pi` (`earendil-works/pi`) — a production-grade
+agent toolkit with the same shape as `nahida` but thirty-plus provider
+adapters, session persistence, telemetry, a client/server protocol. Almost
+none of that was worth copying (that would be exactly the mistake
+[chapter 0](00-why-nahida.md) is about not making); these two pieces were,
+because they were gaps `nahida` genuinely had.
 
-**Retry with backoff.** `nahida` has none today — any transient network
-error or a provider's `5xx` kills the whole `Agent::run()` outright. `pi`'s
-`packages/ai/src/utils/retry.ts` classifies an error as retryable
-(rate-limits, `5xx`, transport failures, premature stream endings) versus
-non-retryable (quota/billing exhaustion — retrying won't help, fail fast),
-then applies bounded exponential backoff only to the retryable class. The
-concept ports cleanly onto `nahida-llm`'s existing `Error` enum
-(`Api{status,..}` / `Transport` / `Stream`); classification would be simpler
-than `pi`'s, since there are two providers here, not thirty.
+**Retry with backoff** (`nahida_llm::Error::is_retryable`, `Agent::max_retries`
+/ `retry_base_delay_ms`) — on by default, unlike `compact_at`/`confirm`.
+There's no scenario where "one transient failure ends the whole run" is what
+anyone actually wants, so this doesn't need an opt-in the way a behavior
+*change* would.
 
-**Reactive overflow detection.** `nahida`'s compaction (chapter 7) is
-proactive — a token threshold you set upfront. If it's unset, wrong, or a
-smaller-context model is in play, a real overflow just surfaces as a hard
-`AgentError::Llm` and ends the run. `pi`'s `packages/ai/src/utils/overflow.ts`
-parses provider error messages for context-overflow shapes (Anthropic's
-`"prompt is too long: X tokens > Y maximum"`, and eleven other providers'
-equivalents) so it can catch that specific failure and attempt one bounded
-compact-and-retry instead of dying. A good hardening pass on top of
-chapter 7, and its own issue.
+**Reactive overflow recovery** (`nahida_llm::Error::is_context_overflow`,
+`Agent::recover_from_overflow`) — independent of [compaction](07-context-compaction.md)'s
+proactive `compact_at` threshold. A real overflow is its own signal, so this
+needs no threshold at all: on that specific error shape, `Agent::run` compacts
+the transcript and retries the same turn exactly once. If it overflows again,
+that error propagates for real — recovery is a safety net, not a loop.
+
+Both are pure hardening: same observable behavior on success, fewer ways a
+transient blip or a misjudged `compact_at` ends the whole session.
+
+## One gap still open: real OS-level sandboxing
+
+Found by reading a second reference, `refs/grok-build` (`xai-org/grok-build`)
+— xAI's `grok` CLI, the first *Rust* reference in the catalog, which makes it
+more directly comparable than `pi` was. Its `xai-grok-sandbox` crate applies
+kernel-enforced isolation (Landlock on Linux, Seatbelt on macOS, via the
+`nono` crate) once at process startup, plus per-subprocess seccomp network
+blocking.
+
+`nahida` has nothing like this. [Sandboxing](05-sandboxing.md) only
+constrains paths passed to `read`/`write`; `bash` just gets `current_dir()`
+set to the workspace root and nothing else. [Permission gating](08-permission-gating.md)
+puts a human in front of every `bash` call, but an *approved* command can
+still read `~/.ssh/id_ed25519` or reach the network — gating and OS-level
+confinement are complementary, not substitutes. Worth its own issue if
+pursued; it's a genuinely different scope than anything built so far (a new
+dependency, applied at `nahida-cli` startup, not something `nahida-tools`
+can do alone).
 
 ## The tool-set roadmap that's already written down
 

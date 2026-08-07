@@ -121,6 +121,28 @@ pub fn refusal_turn(category: &str) -> String {
     .concat()
 }
 
+/// What `FakeProvider` serves for one request.
+pub enum Script {
+    /// A normal 200 response streaming this SSE body.
+    Sse(String),
+    /// An HTTP-level error: a status code plus the API's `{"error": {...}}`
+    /// envelope shape (see `nahida_llm::client::api_error`), for exercising
+    /// retry and overflow-recovery against something that looks real.
+    Error { status: u16, kind: &'static str, message: &'static str },
+}
+
+impl From<String> for Script {
+    fn from(body: String) -> Self {
+        Self::Sse(body)
+    }
+}
+
+impl Script {
+    pub fn error(status: u16, kind: &'static str, message: &'static str) -> Self {
+        Self::Error { status, kind, message }
+    }
+}
+
 /// A running fake provider.
 pub struct FakeProvider {
     pub client: Client,
@@ -130,7 +152,8 @@ pub struct FakeProvider {
 impl FakeProvider {
     /// Serve `scripts` in order. Once exhausted, the last script repeats — which
     /// is what lets a turn-limit test run indefinitely off one entry.
-    pub async fn start(scripts: Vec<String>) -> Self {
+    pub async fn start<T: Into<Script>>(scripts: Vec<T>) -> Self {
+        let scripts: Vec<Script> = scripts.into_iter().map(Into::into).collect();
         assert!(!scripts.is_empty(), "need at least one scripted response");
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -153,18 +176,33 @@ impl FakeProvider {
 
                     // No content-length: `connection: close` plus EOF delimits
                     // the body, which lets us write it in pieces.
-                    let head = "HTTP/1.1 200 OK\r\n\
-                                content-type: text/event-stream\r\n\
-                                connection: close\r\n\r\n";
+                    let (head, payload): (String, Vec<u8>) = match script {
+                        Script::Sse(body) => (
+                            "HTTP/1.1 200 OK\r\n\
+                             content-type: text/event-stream\r\n\
+                             connection: close\r\n\r\n"
+                                .to_string(),
+                            body.as_bytes().to_vec(),
+                        ),
+                        Script::Error { status, kind, message } => (
+                            format!(
+                                "HTTP/1.1 {status} Error\r\n\
+                                 content-type: application/json\r\n\
+                                 connection: close\r\n\r\n"
+                            ),
+                            serde_json::json!({"error": {"type": kind, "message": message}})
+                                .to_string()
+                                .into_bytes(),
+                        ),
+                    };
                     if socket.write_all(head.as_bytes()).await.is_err() {
                         continue;
                     }
 
                     // Split at a boundary that is *not* a frame boundary, so the
                     // decoder has to buffer a partial frame.
-                    let bytes = script.as_bytes();
-                    let split = bytes.len() / 3;
-                    for piece in [&bytes[..split], &bytes[split..]] {
+                    let split = payload.len() / 3;
+                    for piece in [&payload[..split], &payload[split..]] {
                         if socket.write_all(piece).await.is_err() {
                             break;
                         }

@@ -95,6 +95,14 @@ impl Renderer {
                 println!("{DIM}▸ compacting context…{RESET}");
             }
 
+            AgentEvent::Retrying { attempt, max_attempts, delay_ms, reason } => {
+                self.newline_if_needed();
+                println!(
+                    "{RED}⚠ retry {attempt}/{max_attempts} in {delay_ms}ms{RESET} {DIM}— {}{RESET}",
+                    truncate(reason, 120)
+                );
+            }
+
             AgentEvent::Compacted => {
                 self.newline_if_needed();
                 println!("{DIM}  ✓ context compacted{RESET}");

@@ -37,6 +37,14 @@ pub enum AgentEvent {
     Compacting,
     /// The replacement landed; `transcript` is now the summary.
     Compacted,
+    /// A request failed with a transient error and is about to be retried,
+    /// after a backoff of `delay_ms`.
+    Retrying {
+        attempt: u32,
+        max_attempts: u32,
+        delay_ms: u64,
+        reason: String,
+    },
     Done {
         stop_reason: Option<StopReason>,
     },
