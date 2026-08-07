@@ -55,7 +55,7 @@ Where each idea lives, and which are still to come. Tracked as
 | Loop regression tests vs a fake provider | `nahida-agent/tests/` | done |
 | Context compaction | `Agent::compact`, opt-in via `compact_at` | done |
 | Permission gating | `Tool::requires_confirmation`, `Agent::confirm` | done (bash only, all-or-nothing) |
-| Evals | — | to do |
+| Evals | `crates/nahida-cli/tests/evals.rs`, `make eval` | done (2 tasks) |
 
 ## Testing the loop
 
@@ -78,6 +78,20 @@ Two habits worth keeping:
 - After writing a loop test, break the loop on purpose and check the test fails.
   A test that passes against the bug it names is worse than no test.
 
+## Evals
+
+`crates/nahida-cli/tests/evals.rs` asks a different question than the loop
+regression tests: given a real task, does the agent actually get it right?
+That needs a real model call, which costs tokens and money, so every eval is
+`#[ignore]`d — `make check` and CI compile them but never execute one. Run
+them deliberately with `make eval`, which needs real provider credentials in
+the environment.
+
+Add a task with `run_eval(prompt, setup, check)`: `setup` seeds the scratch
+workspace, `check` inspects it afterward. Keep checks as simple as "does the
+expected file have the expected content" — that catches a real regression
+without a task-description format nobody asked for yet.
+
 ## Working here
 
 ```bash
@@ -85,6 +99,7 @@ nix develop
 make run ARGS="what does this repo do"
 make check      # fmt + clippy -D warnings + tests, before every commit
 make validate   # check + release build, before a PR
+make eval       # real-provider evals -- costs tokens, run deliberately
 ```
 
 ## Rules for agents

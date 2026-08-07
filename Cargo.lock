@@ -622,6 +622,7 @@ dependencies = [
  "nahida-llm",
  "nahida-tools",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

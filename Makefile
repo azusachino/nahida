@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help fmt fmt-check lint test check validate run build
+.PHONY: help fmt fmt-check lint test check validate run build eval
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
@@ -29,3 +29,6 @@ check: fmt-check lint test ## Everything that must pass before a commit
 
 validate: check ## Everything that must pass before a PR
 	@cargo build --release
+
+eval: ## Real-provider evals -- costs tokens, never run from check/CI
+	@cargo test -p nahida-cli --test evals -- --ignored --nocapture
