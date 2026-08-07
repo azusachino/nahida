@@ -21,6 +21,7 @@ use nahida_llm::{
 };
 
 use crate::cancel::Cancel;
+use crate::confirm::Confirm;
 use crate::event::AgentEvent;
 use crate::tool::Tool;
 
@@ -67,6 +68,7 @@ pub struct Agent {
     effort: Option<Effort>,
     thinking: Option<Thinking>,
     compact_threshold: Option<u64>,
+    confirm: Option<Arc<dyn Confirm>>,
 }
 
 impl Agent {
@@ -84,6 +86,7 @@ impl Agent {
             effort: None,
             thinking: None,
             compact_threshold: None,
+            confirm: None,
         }
     }
 
@@ -141,6 +144,15 @@ impl Agent {
     #[must_use]
     pub fn compact_at(mut self, tokens: u64) -> Self {
         self.compact_threshold = Some(tokens);
+        self
+    }
+
+    /// Register a handler for calls flagged by [`Tool::requires_confirmation`].
+    /// With none registered (the default), such calls run unconditionally —
+    /// gating is opt-in, same as [`Agent::compact_at`].
+    #[must_use]
+    pub fn confirm(mut self, handler: Arc<dyn Confirm>) -> Self {
+        self.confirm = Some(handler);
         self
     }
 
@@ -350,21 +362,43 @@ impl Agent {
         Ok(acc.finish())
     }
 
-    /// Run every requested tool concurrently and return the results in call order.
+    /// Resolve confirmation for every call, then run the approved ones
+    /// concurrently and return the results in call order.
+    ///
+    /// Confirmation is resolved first and sequentially — one prompt at a
+    /// time — because terminal interaction can't be parallelized the way
+    /// tool execution can. A denial comes back as an error result, never a
+    /// dropped one, same as an unknown tool.
     async fn dispatch(&self, calls: &[(String, String, serde_json::Value)]) -> Vec<ContentBlock> {
-        let futures = calls.iter().map(|(id, name, input)| {
-            let id = id.clone();
+        let mut resolved = Vec::with_capacity(calls.len());
+        for (_, name, input) in calls {
             let tool = self.tools.iter().find(|t| t.name() == name).cloned();
+            let approved = match (&tool, &self.confirm) {
+                (Some(tool), Some(confirm)) if tool.requires_confirmation(input) => {
+                    confirm.ask(name, input).await
+                }
+                _ => true,
+            };
+            resolved.push((tool, approved));
+        }
+
+        let futures = calls.iter().zip(resolved).map(|((id, name, input), (tool, approved))| {
+            let id = id.clone();
             let name = name.clone();
             let input = input.clone();
             async move {
-                let outcome = match tool {
-                    Some(tool) => tool.call(input).await,
-                    // Still return a result: a call with no answer wedges the
-                    // conversation, and the model can recover from a message.
-                    None => crate::tool::ToolOutcome::err(format!(
-                        "unknown tool `{name}` — it is not registered on this agent"
-                    )),
+                let outcome = if approved {
+                    match tool {
+                        Some(tool) => tool.call(input).await,
+                        // Still return a result: a call with no answer wedges
+                        // the conversation, and the model can recover from a
+                        // message.
+                        None => crate::tool::ToolOutcome::err(format!(
+                            "unknown tool `{name}` — it is not registered on this agent"
+                        )),
+                    }
+                } else {
+                    crate::tool::ToolOutcome::err(format!("`{name}` was not approved to run"))
                 };
                 ContentBlock::ToolResult {
                     tool_use_id: id,

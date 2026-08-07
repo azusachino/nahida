@@ -54,7 +54,7 @@ Where each idea lives, and which are still to come. Tracked as
 | Prompt caching (one breakpoint) | `Agent::system` | partial |
 | Loop regression tests vs a fake provider | `nahida-agent/tests/` | done |
 | Context compaction | `Agent::compact`, opt-in via `compact_at` | done |
-| Permission gating | — | to do |
+| Permission gating | `Tool::requires_confirmation`, `Agent::confirm` | done (bash only, all-or-nothing) |
 | Evals | — | to do |
 
 ## Testing the loop

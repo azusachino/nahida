@@ -7,10 +7,12 @@
 
 pub mod agent;
 pub mod cancel;
+pub mod confirm;
 pub mod event;
 pub mod tool;
 
 pub use agent::{Agent, AgentError, Outcome};
 pub use cancel::Cancel;
+pub use confirm::Confirm;
 pub use event::AgentEvent;
 pub use tool::{Tool, ToolOutcome, optional_u64, optional_usize, required_str};
