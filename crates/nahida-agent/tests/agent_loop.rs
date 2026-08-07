@@ -85,6 +85,56 @@ async fn runs_a_tool_then_finishes() {
 }
 
 #[tokio::test]
+async fn compacts_the_transcript_once_the_threshold_is_crossed() {
+    let provider = FakeProvider::start(vec![
+        // Turn 1: a tool call, reporting input_tokens: 10 (the fixed value
+        // every helper in `support` uses).
+        tool_use_turn("Looking.", &[("t1", "spy", serde_json::json!({}))]),
+        // The compaction call's response — what the model hands back as the
+        // summary.
+        text_turn("read main.rs, ran the tests, both passed"),
+        // Turn 2, sent against the now-compacted transcript.
+        text_turn("Done."),
+    ])
+    .await;
+
+    let spy = Arc::new(Spy::new("spy"));
+    let calls = Arc::clone(&spy.calls);
+    // Turn 1 reports input_tokens: 10, so a threshold of 10 fires compaction
+    // before turn 2 is sent.
+    let agent = agent(&provider, vec![spy]).compact_at(10);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    let outcome =
+        agent.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect("loop completes");
+
+    assert_eq!(outcome.stop_reason, Some(StopReason::EndTurn));
+    assert_eq!(outcome.turns, 2, "the compaction call is not itself a turn");
+    // The tool still ran once, on turn 1, before compaction touched anything.
+    assert_eq!(calls.lock().expect("lock").len(), 1);
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 3, "turn 1, the compaction call, then turn 2");
+
+    // The compaction call must not look like a normal coding turn: no tools,
+    // and a different system prompt than the one the agent was built with.
+    assert!(requests[1]["tools"].as_array().is_none(), "compaction call must carry no tools");
+    assert_ne!(requests[1]["system"][0]["text"], "you are a test fixture");
+
+    // Turn 2 is built from the *compacted* transcript — one user message,
+    // not the original "go" + tool_use + tool_result history.
+    assert_eq!(
+        transcript_shape(&requests[2]),
+        vec![("user".to_string(), vec!["text".to_string()])],
+    );
+
+    // The compaction call's own cost is folded into the total, not dropped:
+    // turn 1 + compaction + turn 2, 10 input / 5 output tokens each.
+    assert_eq!(outcome.usage.input_tokens, 30);
+    assert_eq!(outcome.usage.output_tokens, 15);
+}
+
+#[tokio::test]
 async fn replays_the_assistant_turn_and_batches_results_into_one_user_message() {
     let provider = FakeProvider::start(vec![
         tool_use_turn(

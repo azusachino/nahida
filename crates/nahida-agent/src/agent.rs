@@ -66,6 +66,7 @@ pub struct Agent {
     max_turns: u32,
     effort: Option<Effort>,
     thinking: Option<Thinking>,
+    compact_threshold: Option<u64>,
 }
 
 impl Agent {
@@ -82,6 +83,7 @@ impl Agent {
             max_turns: 32,
             effort: None,
             thinking: None,
+            compact_threshold: None,
         }
     }
 
@@ -132,6 +134,16 @@ impl Agent {
         self
     }
 
+    /// Summarize and replace the transcript once the *previous* turn's prompt
+    /// token count reaches `tokens`. Off by default: the right threshold
+    /// depends on the model's context window, which this crate does not track
+    /// per provider, so callers who want it size it themselves.
+    #[must_use]
+    pub fn compact_at(mut self, tokens: u64) -> Self {
+        self.compact_threshold = Some(tokens);
+        self
+    }
+
     /// Ask for summarized reasoning. Without this, thinking blocks arrive empty
     /// and a long think looks like the process has hung.
     #[must_use]
@@ -164,15 +176,31 @@ impl Agent {
         sink: &mut dyn FnMut(AgentEvent),
     ) -> Result<Outcome, AgentError> {
         let mut total = Usage::default();
+        // What the *last* turn's request cost, in prompt tokens — a proxy for
+        // how large the transcript is right now. Zero on turn 1, so
+        // compaction never fires before there is anything to compact.
+        let mut last_prompt_tokens = 0u64;
 
         for turn in 1..=self.max_turns {
             if cancel.is_cancelled() {
                 return Err(AgentError::Cancelled);
             }
 
+            // Only checked here, between turns: the transcript is always
+            // "settled" at this point (every tool_use already has its
+            // tool_result appended), so replacing it can never split a
+            // pending tool exchange.
+            if let Some(threshold) = self.compact_threshold
+                && last_prompt_tokens >= threshold
+            {
+                let cost = self.compact(transcript, cancel, sink).await?;
+                total.add(cost);
+            }
+
             sink(AgentEvent::TurnStart { turn });
             let response = self.one_turn(transcript, cancel, sink).await?;
             total.add(response.usage);
+            last_prompt_tokens = response.usage.prompt_tokens();
             sink(AgentEvent::TurnEnd { usage: response.usage });
 
             match response.stop_reason {
@@ -241,7 +269,64 @@ impl Agent {
         sink: &mut dyn FnMut(AgentEvent),
     ) -> Result<Response, AgentError> {
         let request = self.request(transcript);
-        let mut events = Box::pin(self.client.stream(&request).await?);
+        self.stream_request(&request, cancel, sink).await
+    }
+
+    /// Summarize `transcript` and replace it with the summary, so the next
+    /// turn starts from a smaller context. Returns the summarization call's
+    /// own usage, so callers can fold its cost into a running total.
+    ///
+    /// Only ever called between turns (see [`Agent::run`]), never mid-tool-
+    /// exchange. `transcript` is sent as-is, with the instruction folded into
+    /// the system prompt rather than appended as a new message — the
+    /// transcript can legally end in either role (`PauseTurn` leaves it on
+    /// assistant), and appending a user message would create two consecutive
+    /// user turns whenever it already ended in one, which the API rejects.
+    /// The replacement is a single user message — not a user/assistant pair —
+    /// because the caller always appends an assistant message next (the turn
+    /// that follows), and the API requires alternating roles starting from
+    /// user.
+    async fn compact(
+        &self,
+        transcript: &mut Vec<Message>,
+        cancel: &Cancel,
+        sink: &mut dyn FnMut(AgentEvent),
+    ) -> Result<Usage, AgentError> {
+        sink(AgentEvent::Compacting);
+
+        let request = Request {
+            model: self.model.clone(),
+            max_tokens: 2_048,
+            system: vec![SystemBlock::new(include_str!("compact.md"))],
+            messages: transcript.clone(),
+            tools: Vec::new(),
+            output_config: None,
+            thinking: None,
+            stream: true,
+        };
+
+        let response = self.stream_request(&request, cancel, sink).await?;
+        let summary = response.text();
+
+        *transcript = vec![Message::user(vec![ContentBlock::text(format!(
+            "(earlier conversation compacted)\n\n{summary}"
+        ))])];
+
+        sink(AgentEvent::Compacted);
+        Ok(response.usage)
+    }
+
+    /// Stream one request, forwarding text/thinking deltas to `sink` while
+    /// folding the events into a complete [`Response`]. Shared by
+    /// [`Agent::one_turn`] and [`Agent::compact`] — the only difference
+    /// between a turn and a compaction call is what `Request` gets built.
+    async fn stream_request(
+        &self,
+        request: &Request,
+        cancel: &Cancel,
+        sink: &mut dyn FnMut(AgentEvent),
+    ) -> Result<Response, AgentError> {
+        let mut events = Box::pin(self.client.stream(request).await?);
         let mut acc = Accumulator::new();
 
         while let Some(event) = events.next().await {
