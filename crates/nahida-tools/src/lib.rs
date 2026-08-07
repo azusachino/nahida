@@ -1,14 +1,15 @@
 //! `nahida-tools` — the starting tool set.
 //!
-//! Three tools, chosen because together they close the loop: the agent can look
-//! at the workspace, change it, and check its work. Everything else (grep, glob,
-//! a staleness-checked edit, a gated `git push`) is an addition to a working
-//! thing rather than a prerequisite.
+//! Four tools, chosen because together they close the loop: the agent can look
+//! at the workspace, change it precisely or wholesale, and check its work.
+//! Everything else (`grep`, `glob`, a gated `git push`) is an addition to a
+//! working thing rather than a prerequisite.
 //!
 //! Every path goes through [`Sandbox`], because a path from the model is
 //! untrusted input.
 
 pub mod bash;
+pub mod edit;
 pub mod os_sandbox;
 pub mod read;
 pub mod sandbox;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use nahida_agent::Tool;
 
 pub use bash::Bash;
+pub use edit::Edit;
 pub use os_sandbox::confine_writes;
 pub use read::Read;
 pub use sandbox::Sandbox;
@@ -29,6 +31,7 @@ pub fn default_set(sandbox: &Sandbox) -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(Read::new(sandbox.clone())),
         Arc::new(Write::new(sandbox.clone())),
+        Arc::new(Edit::new(sandbox.clone())),
         Arc::new(Bash::new(sandbox.clone())),
     ]
 }

@@ -5,10 +5,9 @@ use crate::sandbox::Sandbox;
 
 /// Whole-file write.
 ///
-/// Deliberately has no staleness check: a real editing tool refuses to write a
-/// file that changed since the model last read it, and that invariant is exactly
-/// the kind of thing a dedicated tool can enforce and a bash `cat > file` cannot.
-/// Adding it is the natural first extension here.
+/// Deliberately has no staleness check — that invariant belongs to [`crate::Edit`]
+/// now, which refuses a replacement when the text it expected is no longer
+/// there instead of silently overwriting whatever changed.
 pub struct Write {
     sandbox: Sandbox,
 }
