@@ -68,6 +68,8 @@ nahida [PROMPT...]
   -C, --root <DIR>          workspace root; tools cannot escape it  [default: .]
       --max-turns <N>       give up after N tool-calling turns      [default: 32]
       --max-tokens <N>      output cap per turn
+      --compact-at <N>      summarize the transcript once a turn's prompt
+                             reaches N tokens                        [default: off]
       --thinking            stream summarized reasoning
   -v, --verbose             turn boundaries, token usage, tool results
 ```
@@ -80,10 +82,13 @@ Three tools — `read`, `write`, and `bash` — which together let it look at a
 project, change it, and check its own work. Every path is confined to the
 workspace root.
 
-`bash` runs with this process's privileges and nothing asks you first. That is the
-honest starting point rather than a claim to be safe: point `--root` at a repo you
-can afford to have edited, and see `AGENTS.md` for where permission gating is
-going to live.
+`bash` runs with this process's privileges. In an interactive session it asks
+first — every call needs a `y`/`N` before it runs — but that gate is
+all-or-nothing (the harness only sees an opaque command string, so it can't
+tell a `grep` from a `git push --force` yet) and only exists when stdin is a
+terminal: a scripted or piped invocation runs ungated rather than hanging on a
+prompt no one can answer. Point `--root` at a repo you can afford to have
+edited regardless.
 
 ## Reading the code
 
@@ -92,4 +97,6 @@ rest of the repo exists to serve it. `crates/nahida-llm/src/stream.rs` is the
 other place worth reading closely — folding a stream of events back into one
 message is where the non-obvious details are.
 
-`AGENTS.md` has the crate contract and the concept map.
+`AGENTS.md` has the crate contract and the concept map. `make tutorial` serves
+a 0-to-hero walkthrough (`docs/`) that follows the concept map chapter by
+chapter, using this code as the worked example.
