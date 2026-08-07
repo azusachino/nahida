@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use nahida_agent::{Agent, AgentError, Cancel, Confirm, Tool, ToolOutcome};
 use nahida_llm::{ContentBlock, Message, StopReason};
-use support::{FakeProvider, refusal_turn, text_turn, tool_use_turn, transcript_shape};
+use support::{FakeProvider, Script, refusal_turn, text_turn, tool_use_turn, transcript_shape};
 
 /// Records what it was called with and returns a fixed answer.
 struct Spy {
@@ -376,4 +376,111 @@ async fn the_system_prompt_and_tool_schemas_are_sent() {
     for banned in ["temperature", "top_p", "top_k"] {
         assert!(request.get(banned).is_none(), "{banned} must never be sent");
     }
+}
+
+#[tokio::test]
+async fn retries_a_transient_server_error_then_succeeds() {
+    let provider = FakeProvider::start(vec![
+        Script::error(503, "overloaded_error", "overloaded"),
+        text_turn("recovered").into(),
+    ])
+    .await;
+
+    let a = agent(&provider, vec![]).max_retries(1).retry_base_delay_ms(1);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    let outcome = a.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect("recovers");
+
+    assert_eq!(outcome.stop_reason, Some(StopReason::EndTurn));
+    assert_eq!(provider.requests().len(), 2, "the failed attempt plus the retry");
+}
+
+#[tokio::test]
+async fn gives_up_after_max_retries_on_a_persistent_transient_error() {
+    // FakeProvider repeats its last script forever, so this never recovers.
+    let provider = FakeProvider::start(vec![Script::error(500, "api_error", "down")]).await;
+
+    let a = agent(&provider, vec![]).max_retries(2).retry_base_delay_ms(1);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    let err = a.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect_err("must give up");
+
+    assert!(matches!(err, AgentError::Llm(_)), "got {err:?}");
+    assert_eq!(provider.requests().len(), 3, "the initial attempt plus 2 retries, then stop");
+}
+
+#[tokio::test]
+async fn a_non_retryable_error_fails_immediately() {
+    let provider =
+        FakeProvider::start(vec![Script::error(401, "authentication_error", "bad key")]).await;
+
+    let a = agent(&provider, vec![]).max_retries(3).retry_base_delay_ms(1);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    a.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect_err("must fail");
+
+    assert_eq!(provider.requests().len(), 1, "an auth failure must never be retried");
+}
+
+#[tokio::test]
+async fn recovers_from_a_real_overflow_by_compacting_and_retrying_once() {
+    let provider = FakeProvider::start(vec![
+        Script::error(400, "invalid_request_error", "prompt is too long: 999999 > 200000"),
+        text_turn("summary of everything so far").into(), // the compaction call
+        text_turn("Done.").into(),                        // the retried turn
+    ])
+    .await;
+
+    // recover_from_overflow defaults true; no compact_at needed, a real
+    // overflow is its own signal.
+    let a = agent(&provider, vec![]);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    let outcome = a.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect("recovers");
+
+    assert_eq!(outcome.stop_reason, Some(StopReason::EndTurn));
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 3, "the overflowing turn, the compaction call, the retried turn");
+    assert_eq!(
+        transcript_shape(&requests[2]),
+        vec![("user".to_string(), vec!["text".to_string()])],
+        "the retried turn goes out against the compacted transcript"
+    );
+}
+
+#[tokio::test]
+async fn overflow_recovery_gets_exactly_one_attempt() {
+    let provider = FakeProvider::start(vec![
+        Script::error(400, "invalid_request_error", "prompt is too long: 999999 > 200000"),
+        text_turn("summary").into(),
+        Script::error(400, "invalid_request_error", "prompt is too long: 999999 > 200000"),
+    ])
+    .await;
+
+    let a = agent(&provider, vec![]);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    let err = a.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect_err("must fail");
+
+    assert!(matches!(err, AgentError::Llm(_)), "got {err:?}");
+    assert_eq!(provider.requests().len(), 3, "no second recovery attempt");
+}
+
+#[tokio::test]
+async fn overflow_recovery_can_be_disabled() {
+    let provider = FakeProvider::start(vec![Script::error(
+        400,
+        "invalid_request_error",
+        "prompt is too long: 999999 > 200000",
+    )])
+    .await;
+
+    let a = agent(&provider, vec![]).recover_from_overflow(false);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    a.run(&mut transcript, &Cancel::new(), &mut |_| {})
+        .await
+        .expect_err("must fail without recovery");
+
+    assert_eq!(provider.requests().len(), 1);
 }

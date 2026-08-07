@@ -51,6 +51,20 @@ struct Cli {
     #[arg(long)]
     max_tokens: Option<u32>,
 
+    /// Retries for a rate limit, server overload, or transport error, with
+    /// exponential backoff. 0 disables retrying.
+    #[arg(long, default_value_t = 3)]
+    max_retries: u32,
+
+    /// Base backoff delay in ms; doubles each retry attempt.
+    #[arg(long, default_value_t = 500)]
+    retry_base_delay_ms: u64,
+
+    /// Disable the one-shot compact-and-retry recovery on a real
+    /// context-overflow error. On by default; independent of --compact-at.
+    #[arg(long)]
+    no_overflow_recovery: bool,
+
     /// Show summarized reasoning as it streams.
     #[arg(long)]
     thinking: bool,
@@ -91,6 +105,9 @@ async fn main() -> Result<()> {
         .effort(cli.effort)
         .max_turns(cli.max_turns)
         .max_tokens(max_tokens)
+        .max_retries(cli.max_retries)
+        .retry_base_delay_ms(cli.retry_base_delay_ms)
+        .recover_from_overflow(!cli.no_overflow_recovery)
         .show_thinking(cli.thinking);
     if let Some(threshold) = cli.compact_at {
         agent = agent.compact_at(threshold);

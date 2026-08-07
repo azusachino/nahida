@@ -48,6 +48,38 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+impl Error {
+    /// Whether retrying the same request, unchanged, has a reasonable chance
+    /// of succeeding. Transport failures and provider overload/rate-limit
+    /// signals are transient; a decode failure or a rejected request are
+    /// not — retrying either just reproduces the same failure.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Transport(_) => true,
+            Self::Api { status, .. } => matches!(status, 429 | 500 | 502 | 503 | 504),
+            Self::Stream { kind, .. } => {
+                matches!(kind.as_str(), "overloaded_error" | "rate_limit_error" | "api_error")
+            }
+            Self::Decode { .. } | Self::NoCredentials => false,
+        }
+    }
+
+    /// Whether this looks like the request exceeded the model's context
+    /// window, as opposed to any other rejection. Anthropic reports this as
+    /// a 400 with "prompt is too long" in the message, or a 413
+    /// (`request_too_large`); this only covers the shape observed from
+    /// first-party Anthropic, not every compatible gateway's wording.
+    pub fn is_context_overflow(&self) -> bool {
+        match self {
+            Self::Api { status, message, .. } => {
+                *status == 413 || message.contains("prompt is too long")
+            }
+            Self::Stream { message, .. } => message.contains("prompt is too long"),
+            _ => false,
+        }
+    }
+}
+
 /// How much of the Messages API the endpoint actually implements.
 ///
 /// The wire format is the same, the *feature set* is not. An Anthropic-compatible
@@ -375,5 +407,48 @@ mod tests {
         assert_eq!(Dialect::infer("https://api.anthropic.com"), Dialect::Anthropic);
         assert_eq!(Dialect::infer("https://api.z.ai/api/anthropic"), Dialect::Compat);
         assert_eq!(Dialect::infer("http://localhost:8080/v1"), Dialect::Compat);
+    }
+
+    #[test]
+    fn server_overload_and_rate_limits_are_retryable() {
+        for status in [429, 500, 502, 503, 504] {
+            let err = Error::Api { status, kind: "x".to_string(), message: "x".to_string() };
+            assert!(err.is_retryable(), "{status} should be retryable");
+        }
+    }
+
+    #[test]
+    fn rejected_requests_are_not_retryable() {
+        for status in [400, 401, 403, 404, 413] {
+            let err = Error::Api { status, kind: "x".to_string(), message: "x".to_string() };
+            assert!(!err.is_retryable(), "{status} should not be retryable");
+        }
+    }
+
+    #[test]
+    fn decode_failures_and_missing_credentials_are_not_retryable() {
+        assert!(!Error::NoCredentials.is_retryable());
+        let source = serde_json::from_str::<Response>("not json").unwrap_err();
+        assert!(!(Error::Decode { what: "x", source }).is_retryable());
+    }
+
+    #[test]
+    fn a_413_or_too_long_message_is_context_overflow() {
+        let by_status = Error::Api { status: 413, kind: "x".to_string(), message: "x".to_string() };
+        assert!(by_status.is_context_overflow());
+
+        let by_message = Error::Api {
+            status: 400,
+            kind: "invalid_request_error".to_string(),
+            message: "prompt is too long: 213462 tokens > 200000 maximum".to_string(),
+        };
+        assert!(by_message.is_context_overflow());
+
+        let unrelated_400 = Error::Api {
+            status: 400,
+            kind: "invalid_request_error".to_string(),
+            message: "messages: roles must alternate".to_string(),
+        };
+        assert!(!unrelated_400.is_context_overflow());
     }
 }

@@ -14,6 +14,9 @@ async-trait.workspace = true
 futures-util.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# Backoff sleep during retry -- the only place this crate depends on a
+# concrete runtime rather than staying executor-agnostic.
+tokio.workspace = true
 
 [dev-dependencies]
 # `net` for the fake provider's TcpListener; the rest come from the workspace set.
