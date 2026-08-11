@@ -31,8 +31,8 @@ usually in the wrong crate.
 | --- | --- |
 | `crates/nahida-llm/` | Provider: wire types, auth, dialects, SSE streaming |
 | `crates/nahida-agent/` | The loop: turns, tool dispatch, cancellation, events |
-| `crates/nahida-tools/` | `read`, `write`, `bash`, and path confinement |
-| `crates/nahida-cli/` | The `nahida` binary: flags, REPL, rendering |
+| `crates/nahida-tools/` | `read`, `write`, `edit`, `bash`, `find`, `grep`, `ls`, and path confinement |
+| `crates/nahida-cli/` | The `nahida` binary: flags, REPL, rendering, `@file` expansion, session persistence |
 | `crates/*/src/*.md` | Tool descriptions and the system prompt, next to the code |
 | `docs/` | The 0-to-hero tutorial: a concept-by-concept walkthrough of this repo, MkDocs Material, `mise`+`uv`-managed and kept apart from the Rust devShell |
 
@@ -40,6 +40,13 @@ Prompt text lives in `.md` files beside the code it describes and is pulled in
 with `include_str!`. Descriptions are load-bearing — they are how the model
 decides when to call a tool — so they belong somewhere you can read and edit as
 prose, not buried in a string constant.
+
+This split mirrors `earendil-works/pi`'s real package boundary once you strip
+its remote-session support: `ai` → `agent` → `coding-agent` there is
+`nahida-llm` → `nahida-agent` → `nahida-tools`+`nahida-cli` here. pi's
+`protocol`/`client`/`server` packages exist only to run a session remotely,
+and `telemetry` has no consumer nahida needs — both are deliberately not
+ported; adding them here would be structure with nothing using it.
 
 ## The concept map
 
@@ -60,6 +67,10 @@ Where each idea lives, and which are still to come. Tracked as
 | Evals | `crates/nahida-cli/tests/evals.rs`, `make eval` | done (2 tasks) |
 | Reliability: retry with backoff, reactive overflow recovery | `Agent::max_retries`, `Agent::recover_from_overflow` | done |
 | OS-level write confinement (Landlock) | `nahida-tools/src/os_sandbox.rs` | done, Linux only — macOS deliberately deferred (see `docs/pages/11-whats-next.md`) |
+| Gitignore-aware search (`find`, `grep`), directory listing (`ls`) | `nahida-tools/src/{find,grep,ls}.rs` | done |
+| `@file` prompt expansion | `nahida-cli/src/prompt.rs` | done |
+| Machine-readable event stream (`--json`) | `AgentEvent: Serialize`, `nahida-cli/src/main.rs` | done |
+| Session persistence (JSONL log, `--continue`/`--resume`) | `nahida-cli/src/session.rs` | done |
 
 ## Testing the loop
 
@@ -126,3 +137,19 @@ make tutorial   # serve docs/ locally -- the 0-to-hero walkthrough
    struct omits them so the compiler enforces this.
 7. **Anthropic-only fields go through `Dialect`.** Adding one means teaching
    `Dialect::adapt` to strip it, or compatible gateways start failing.
+8. **Read a file in full before a wide-ranging change to it.** A snippet from
+   search is not enough context to edit a loop invariant or a trait contract
+   correctly.
+9. **Ask before removing functionality that looks intentional.** If it's not
+   obviously dead code, it might be a design decision recorded nowhere but
+   the code itself.
+10. **Answer a direct question before editing code in response to it.** State
+    the answer, then make the change — don't let the diff be the only reply.
+11. **The user's explicit instruction overrides every rule above.** These
+    rules are defaults for the unstated case, not a ceiling on what's allowed.
+
+## Git
+
+Commit messages are scoped by crate: `{feat,fix,chore,docs}(llm|agent|tools|cli): message`,
+or unscoped for changes spanning the whole workspace (`AGENTS.md`, `Cargo.toml`,
+`Makefile`).

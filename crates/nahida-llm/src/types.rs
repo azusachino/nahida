@@ -275,7 +275,7 @@ pub struct StopDetails {
     pub explanation: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Usage {
     #[serde(default)]
     pub input_tokens: u64,
