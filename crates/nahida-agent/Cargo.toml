@@ -12,6 +12,7 @@ nahida-llm.workspace = true
 
 async-trait.workspace = true
 futures-util.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 # Backoff sleep during retry -- the only place this crate depends on a
