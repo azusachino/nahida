@@ -103,18 +103,36 @@ fn adapt(self, req: &mut Request) {
     for tool in &mut req.tools {
         tool.cache_control = None;
     }
+    for message in &mut req.messages {
+        for block in &mut message.content {
+            if let ContentBlock::Text { cache_control, .. }
+            | ContentBlock::ToolResult { cache_control, .. } = block
+            {
+                *cache_control = None;
+            }
+        }
+    }
 }
 ```
+
+That last loop is a lesson in its own right, from [chapter 11](11-whats-next.md):
+`cache_control` first existed only on `system`/`tools`, and this function
+stripped it from both. When a second breakpoint was added on the growing
+`messages` transcript, this function needed a third loop, or a `Compat`
+gateway would suddenly start receiving a field it might reject — silently,
+until someone hit exactly that gateway. Adding an Anthropic-only field
+anywhere in `Request` means coming back here.
 
 The dialect is inferred from the host — anything not ending in
 `anthropic.com` is treated as `Compat` — and can be overridden with
 `NAHIDA_DIALECT`. The practical consequence, confirmed the hard way while
 building this project: if you're on a Z.ai (or any compatible-gateway) key,
-`Agent::effort(...)`, `.show_thinking(true)`, and the prompt-cache breakpoint
-on the system prompt are all **silent no-ops**. Not errors — the request
-still succeeds — just nothing you asked for actually happens. If you ever
-wonder why a flag you passed didn't change anything, check which dialect
-you're on before you check anything else.
+`Agent::effort(...)`, `.show_thinking(true)`, and both prompt-cache
+breakpoints (system prompt, and the moving one on `messages`) are all
+**silent no-ops**. Not errors — the request still succeeds — just nothing
+you asked for actually happens. If you ever wonder why a flag you passed
+didn't change anything, check which dialect you're on before you check
+anything else.
 
 ## What you should be able to answer now
 

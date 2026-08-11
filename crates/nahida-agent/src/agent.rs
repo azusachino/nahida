@@ -204,11 +204,25 @@ impl Agent {
     }
 
     fn request(&self, messages: &[Message]) -> Request {
+        let mut messages = messages.to_vec();
+        // A moving cache breakpoint: each turn's messages are the previous
+        // turn's plus a few new blocks, so marking the new last block reuses
+        // everything up to the old breakpoint instead of reprocessing the
+        // whole transcript every turn. Safe here specifically because
+        // `request()` is only ever called from `one_turn`, which only ever
+        // runs when `transcript` ends in a user turn (the initial prompt, or
+        // a batch of tool results) — never mid-assistant-turn. That's why
+        // only `Text`/`ToolResult` need `cache_control` at all; see
+        // `ContentBlock::mark_cached`.
+        if let Some(block) = messages.last_mut().and_then(|m| m.content.last_mut()) {
+            block.mark_cached();
+        }
+
         Request {
             model: self.model.clone(),
             max_tokens: self.max_tokens,
             system: self.system.clone(),
-            messages: messages.to_vec(),
+            messages,
             tools: self.tools.iter().map(|t| t.spec()).collect(),
             output_config: self.effort.map(|e| OutputConfig { effort: Some(e) }),
             thinking: self.thinking,
@@ -494,6 +508,7 @@ impl Agent {
                     tool_use_id: id,
                     content: outcome.content,
                     is_error: outcome.is_error,
+                    cache_control: None,
                 }
             }
         });
