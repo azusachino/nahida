@@ -53,7 +53,7 @@ Where each idea lives, and which are still to come. Tracked as
 | Tool schemas and parallel dispatch | `nahida-agent/tool.rs`, `nahida-tools` | done |
 | Staleness-checked edit (targeted replacement, not a blind overwrite) | `nahida-tools/src/edit.rs` | done |
 | Path confinement | `nahida-tools/sandbox.rs` | done |
-| Prompt caching (one breakpoint) | `Agent::system` | partial |
+| Prompt caching (tools+system prefix breakpoint, plus a moving breakpoint on the growing transcript) | `Agent::system`, `ContentBlock::mark_cached`, `Agent::request` | done |
 | Loop regression tests vs a fake provider | `nahida-agent/tests/` | done |
 | Context compaction | `Agent::compact`, opt-in via `compact_at` | done |
 | Permission gating | `Tool::requires_confirmation`, `Agent::confirm` | done (bash only, all-or-nothing) |

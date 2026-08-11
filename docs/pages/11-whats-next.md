@@ -1,10 +1,7 @@
 # What's next
 
-Everything in `AGENTS.md`'s concept map is now "done" except prompt caching
-(still "partial" — it works on first-party Anthropic and silently no-ops on
-any `Compat`-dialect gateway, which is how the dialect system in chapter 1 is
-supposed to behave, not a bug to fix) and macOS sandboxing (deliberately
-deferred — see below).
+Everything in `AGENTS.md`'s concept map is now "done" except macOS
+sandboxing (deliberately deferred — see below).
 
 ## Shipped: retry with backoff, reactive overflow recovery
 
@@ -95,6 +92,51 @@ plain file's path into one `open(2)` refuses with `ENOTDIR`. No prior test
 had ever resolved a path that already fully existed as a file — `edit`'s
 tests were the first to, which is exactly the value of writing the tests
 before trusting the code: this failed loudly rather than silently.
+
+## Shipped: the second cache breakpoint
+
+`Agent::system()`'s breakpoint (chapter 1) only ever covered the *static*
+prefix — tools and system, since caching is a prefix match and render order
+is tools → system → messages. What it never touched was the part that
+actually dominates cost in an agentic loop: `messages` itself, which grows
+every turn and was rebuilt from scratch, with zero cache annotation, on
+every single request. For a multi-turn REPL session or any tool-calling
+sequence, that meant reprocessing the entire prior conversation at full
+price on every turn, even though each turn's `messages` is just the last
+turn's `messages` plus a few new blocks.
+
+The fix is a *moving* breakpoint: `Agent::request()` marks the last content
+block of the last message on every outgoing request
+(`ContentBlock::mark_cached`, `nahida-llm/src/types.rs`). `transcript`
+itself is never mutated with `cache_control` — only the per-request clone
+is — so each turn's prefix, up to wherever the *previous* turn's breakpoint
+landed, is byte-identical to what got cached last time and is served from
+cache; only the newly appended tail costs full price, and a fresh breakpoint
+lands on the new tail's end for the next turn to reuse.
+
+This only needed the field on two of `ContentBlock`'s five variants —
+`Text` and `ToolResult` — because `request()` is only ever called with
+`transcript` ending in a user turn (the initial prompt, or a batch of tool
+results); it never runs mid-assistant-turn, so `Thinking` and `ToolUse`
+never appear as the last block going out. Discovering that invariant was
+also what made the *test* for this straightforward instead of speculative:
+`tests/agent_loop.rs`'s `the_cache_breakpoint_moves_to_the_newest_message_each_turn`
+scripts a tool-use turn followed by a text turn, and asserts the breakpoint
+is on turn 1's only message, then has moved off it — not lingering — by
+turn 2.
+
+One thing this reopened: [chapter 1](01-the-provider-layer.md)'s
+`Dialect::adapt` already stripped `cache_control` from `system` and `tools`
+for a `Compat` gateway, specifically because an unknown field can cause a
+hard rejection depending on the gateway. Adding `cache_control` to
+`ContentBlock` without teaching `adapt` to strip it there too would have
+quietly reintroduced the exact bug that method exists to prevent — so it
+now strips it from `messages` as well. The test harness itself needed a
+small addition to catch this class of mistake: `FakeProvider` hardcoded
+`Compat` dialect, which would have stripped the field before any test could
+ever observe it, so `FakeProvider::start_with_dialect` exists now for the
+one test that specifically needs `Anthropic` dialect to see the breakpoint
+survive to the wire.
 
 ## The tool-set roadmap that's still open
 
