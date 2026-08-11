@@ -5,7 +5,9 @@
 //! killing the process mid-turn.
 
 mod confirm;
+mod prompt;
 mod render;
+mod session;
 
 use std::io::{IsTerminal as _, Write as _};
 use std::sync::Arc;
@@ -17,9 +19,13 @@ use nahida_agent::{Agent, AgentError, Cancel};
 use nahida_llm::{Client, ContentBlock, Effort, Message};
 use nahida_tools::Sandbox;
 use render::Renderer;
+use session::SessionStore;
 
 #[derive(Parser)]
 #[command(name = "nahida", version, about = "A small coding agent.")]
+// Independent CLI flags, not a state machine -- clap's derive wants each as
+// its own field.
+#[allow(clippy::struct_excessive_bools)]
 struct Cli {
     /// The task. Omit for an interactive session.
     prompt: Vec<String>,
@@ -72,6 +78,23 @@ struct Cli {
     /// Show turn boundaries, token usage, and successful tool results.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Print one JSON-encoded `AgentEvent` per line to stdout instead of
+    /// human-readable rendering. For scripting; diagnostics still go to stderr.
+    #[arg(long)]
+    json: bool,
+
+    /// Resume the most recent session for this workspace root.
+    #[arg(short = 'c', long = "continue")]
+    continue_session: bool,
+
+    /// Resume a specific session by id. Overrides --continue.
+    #[arg(long)]
+    resume: Option<String>,
+
+    /// Don't read or write a session log for this run.
+    #[arg(long)]
+    no_session: bool,
 }
 
 #[tokio::main]
@@ -146,43 +169,112 @@ async fn main() -> Result<()> {
     }
 
     let mut transcript: Vec<Message> = Vec::new();
+    let mut session = if cli.no_session {
+        None
+    } else {
+        let sessions_dir = SessionStore::sessions_dir()?;
+        if cli.continue_session || cli.resume.is_some() {
+            let (store, loaded) =
+                SessionStore::resume(&sessions_dir, sandbox.root(), cli.resume.as_deref())?;
+            transcript = loaded;
+            Some(store)
+        } else {
+            Some(SessionStore::create(&sessions_dir, sandbox.root())?)
+        }
+    };
+    if let Some(s) = &session
+        && cli.verbose
+    {
+        eprintln!("session {} (resume with `nahida --resume {}`)", s.id, s.id);
+    }
+
+    let ctx = RunCtx {
+        agent: &agent,
+        cancel: &cancel,
+        sandbox: &sandbox,
+        verbose: cli.verbose,
+        json: cli.json,
+    };
 
     if cli.prompt.is_empty() {
-        repl(&agent, &cancel, &mut transcript, cli.verbose).await
+        repl(&ctx, &mut transcript, &mut session).await
     } else {
         let prompt = cli.prompt.join(" ");
-        run_once(&agent, &cancel, &mut transcript, &prompt, cli.verbose).await
+        run_once(&ctx, &mut transcript, session.as_mut(), &prompt).await
     }
+}
+
+/// What every turn needs, independent of which turn it is. Bundled so
+/// `run_once`/`repl` take one reference instead of growing a parameter each
+/// time the CLI gains a mode.
+struct RunCtx<'a> {
+    agent: &'a Agent,
+    cancel: &'a Cancel,
+    sandbox: &'a Sandbox,
+    verbose: bool,
+    json: bool,
 }
 
 /// One prompt, one answer. Errors are reported and returned, not swallowed.
 async fn run_once(
-    agent: &Agent,
-    cancel: &Cancel,
+    ctx: &RunCtx<'_>,
     transcript: &mut Vec<Message>,
+    session: Option<&mut SessionStore>,
     prompt: &str,
-    verbose: bool,
 ) -> Result<()> {
-    cancel.reset();
+    ctx.cancel.reset();
+    let prompt = prompt::expand_file_refs(prompt, ctx.sandbox);
+    let session_start = transcript.len();
     transcript.push(Message::user(vec![ContentBlock::text(prompt)]));
 
-    let mut renderer = Renderer::new(verbose);
-    let result = agent.run(transcript, cancel, &mut |event| renderer.handle(&event)).await;
-    renderer.finish();
+    let mut renderer = Renderer::new(ctx.verbose);
+    let result = if ctx.json {
+        ctx.agent
+            .run(transcript, ctx.cancel, &mut |event| {
+                println!(
+                    "{}",
+                    serde_json::to_string(&event).expect("AgentEvent always serializes")
+                );
+            })
+            .await
+    } else {
+        ctx.agent.run(transcript, ctx.cancel, &mut |event| renderer.handle(&event)).await
+    };
+    if !ctx.json {
+        renderer.finish();
+    }
+
+    // Persisted regardless of `result`: even a cancelled or failed turn's
+    // partial additions should survive to the next `--continue`, the same
+    // way `transcript` itself stays usable in memory after an error.
+    if let Some(session) = session {
+        for message in &transcript[session_start..] {
+            if let Err(e) = session.append(message) {
+                eprintln!("warning: could not persist to session: {e}");
+            }
+        }
+    }
 
     match result {
         Ok(outcome) => {
-            if outcome.truncated() {
-                eprintln!("\n(cut off at the output limit — raise --max-tokens to see the rest)");
-            }
-            if verbose {
-                eprintln!("{} turns · {}", outcome.turns, render::format_usage(&outcome.usage));
+            // Diagnostics, not part of the event stream -- kept human-only.
+            if !ctx.json {
+                if outcome.truncated() {
+                    eprintln!(
+                        "\n(cut off at the output limit — raise --max-tokens to see the rest)"
+                    );
+                }
+                if ctx.verbose {
+                    eprintln!("{} turns · {}", outcome.turns, render::format_usage(&outcome.usage));
+                }
             }
             Ok(())
         }
         // Interrupting is a choice the user made, not a failure to report back.
         Err(AgentError::Cancelled) => {
-            eprintln!("(interrupted)");
+            if !ctx.json {
+                eprintln!("(interrupted)");
+            }
             Ok(())
         }
         Err(e) => Err(e.into()),
@@ -192,12 +284,13 @@ async fn run_once(
 /// Interactive session. The transcript carries across prompts, so follow-ups
 /// keep their context — and so the prompt cache keeps hitting.
 async fn repl(
-    agent: &Agent,
-    cancel: &Cancel,
+    ctx: &RunCtx<'_>,
     transcript: &mut Vec<Message>,
-    verbose: bool,
+    session: &mut Option<SessionStore>,
 ) -> Result<()> {
-    let interactive = std::io::stdin().is_terminal();
+    // In `--json` mode stdout is the event stream; the banner and prompt
+    // indicator below are human chrome that would otherwise land in it.
+    let interactive = std::io::stdin().is_terminal() && !ctx.json;
     if interactive {
         println!("nahida — Ctrl-C interrupts, Ctrl-D or `exit` quits.");
     }
@@ -221,7 +314,7 @@ async fn repl(
         }
 
         // A failed prompt should not end the session — report it and keep going.
-        if let Err(e) = run_once(agent, cancel, transcript, line, verbose).await {
+        if let Err(e) = run_once(ctx, transcript, session.as_mut(), line).await {
             eprintln!("error: {e:#}");
         }
     }
