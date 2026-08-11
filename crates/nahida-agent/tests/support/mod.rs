@@ -152,7 +152,16 @@ pub struct FakeProvider {
 impl FakeProvider {
     /// Serve `scripts` in order. Once exhausted, the last script repeats — which
     /// is what lets a turn-limit test run indefinitely off one entry.
+    ///
+    /// `Compat` dialect, so most tests also exercise the loop against a
+    /// request with `output_config`/`thinking`/`cache_control` stripped —
+    /// use [`FakeProvider::start_with_dialect`] for a test that needs one of
+    /// those fields to actually reach the recorded request.
     pub async fn start<T: Into<Script>>(scripts: Vec<T>) -> Self {
+        Self::start_with_dialect(scripts, Dialect::Compat).await
+    }
+
+    pub async fn start_with_dialect<T: Into<Script>>(scripts: Vec<T>, dialect: Dialect) -> Self {
         let scripts: Vec<Script> = scripts.into_iter().map(Into::into).collect();
         assert!(!scripts.is_empty(), "need at least one scripted response");
 
@@ -217,7 +226,7 @@ impl FakeProvider {
         let profile = Profile {
             name: "fake",
             base_url: format!("http://127.0.0.1:{port}"),
-            dialect: Dialect::Compat,
+            dialect,
             default_model: "fake-1".to_string(),
             default_max_tokens: 1024,
         };

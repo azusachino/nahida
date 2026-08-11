@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use nahida_agent::{Agent, AgentError, Cancel, Confirm, Tool, ToolOutcome};
-use nahida_llm::{ContentBlock, Message, StopReason};
+use nahida_llm::{ContentBlock, Dialect, Message, StopReason};
 use support::{FakeProvider, Script, refusal_turn, text_turn, tool_use_turn, transcript_shape};
 
 /// Records what it was called with and returns a fixed answer.
@@ -376,6 +376,53 @@ async fn the_system_prompt_and_tool_schemas_are_sent() {
     for banned in ["temperature", "top_p", "top_k"] {
         assert!(request.get(banned).is_none(), "{banned} must never be sent");
     }
+}
+
+#[tokio::test]
+async fn the_cache_breakpoint_moves_to_the_newest_message_each_turn() {
+    // Anthropic dialect: `Compat` (what `FakeProvider::start` defaults to)
+    // strips `cache_control` before the request is ever recorded, which
+    // would make this test pass for the wrong reason.
+    let provider = FakeProvider::start_with_dialect(
+        vec![
+            tool_use_turn("Looking.", &[("t1", "spy", serde_json::json!({}))]),
+            text_turn("Done."),
+        ],
+        Dialect::Anthropic,
+    )
+    .await;
+
+    let agent = agent(&provider, vec![Arc::new(Spy::new("spy"))]);
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    agent.run(&mut transcript, &Cancel::new(), &mut |_| {}).await.expect("loop completes");
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 2);
+
+    // Turn 1: one message ("go"), breakpoint on its only block.
+    let turn1_messages = requests[0]["messages"].as_array().expect("messages");
+    assert_eq!(turn1_messages.len(), 1);
+    assert!(
+        turn1_messages[0]["content"][0].get("cache_control").is_some(),
+        "turn 1 breakpoint missing: {turn1_messages:?}"
+    );
+
+    // Turn 2: user "go", assistant tool_use, user tool_result. The old
+    // breakpoint must not linger on the original message -- it should have
+    // moved to the newest one, or every turn re-caches the whole prefix from
+    // scratch and the growing transcript is never reused.
+    let turn2_messages = requests[1]["messages"].as_array().expect("messages");
+    assert_eq!(turn2_messages.len(), 3);
+    assert!(
+        turn2_messages[0]["content"][0].get("cache_control").is_none(),
+        "the old breakpoint must not still be on the first message: {turn2_messages:?}"
+    );
+    let last_message = turn2_messages.last().expect("last message");
+    let last_block = last_message["content"].as_array().expect("content").last().expect("block");
+    assert!(
+        last_block.get("cache_control").is_some(),
+        "turn 2 breakpoint missing: {last_message:?}"
+    );
 }
 
 #[tokio::test]
