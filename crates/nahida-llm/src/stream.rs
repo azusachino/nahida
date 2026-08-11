@@ -185,7 +185,7 @@ impl Accumulator {
             }
             StreamEvent::ContentBlockStart { index, content_block } => {
                 let partial = match content_block {
-                    ContentBlock::Text { text } => Partial::Text(text.clone()),
+                    ContentBlock::Text { text, .. } => Partial::Text(text.clone()),
                     ContentBlock::Thinking { thinking, signature } => {
                         Partial::Thinking { text: thinking.clone(), signature: signature.clone() }
                     }
@@ -244,7 +244,7 @@ impl Accumulator {
             .blocks
             .into_iter()
             .filter_map(|p| match p {
-                Partial::Text(text) => Some(ContentBlock::Text { text }),
+                Partial::Text(text) => Some(ContentBlock::Text { text, cache_control: None }),
                 Partial::Thinking { text, signature } => {
                     Some(ContentBlock::Thinking { thinking: text, signature })
                 }

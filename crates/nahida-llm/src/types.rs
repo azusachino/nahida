@@ -39,6 +39,12 @@ pub enum Role {
 pub enum ContentBlock {
     Text {
         text: String,
+        /// A prompt-cache breakpoint. Only meaningful here and on
+        /// [`ContentBlock::ToolResult`] — [`Agent::request`](../../nahida_agent/struct.Agent.html)
+        /// only ever ends a request's `messages` in one of those two variants
+        /// (see its own doc comment), so nothing else needs the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     /// On Opus 5 the raw chain of thought is never returned. With the default
     /// `display: "omitted"` these arrive with `thinking` empty; ask for
@@ -54,11 +60,7 @@ pub enum ContentBlock {
     },
     /// The model asking us to run a tool. `input` is whatever the tool's schema
     /// declared; validating it is the tool's job, not the transport's.
-    ToolUse {
-        id: String,
-        name: String,
-        input: serde_json::Value,
-    },
+    ToolUse { id: String, name: String, input: serde_json::Value },
     /// Our answer to a `ToolUse`. `tool_use_id` must match, and every pending
     /// call must get one — a dropped result is a stuck conversation.
     ToolResult {
@@ -66,6 +68,8 @@ pub enum ContentBlock {
         content: String,
         #[serde(default, skip_serializing_if = "is_false")]
         is_error: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     /// Anything the API adds that we do not model (`redacted_thinking`,
     /// `server_tool_use`, …). Present so a new block type is a shrug rather than
@@ -76,7 +80,20 @@ pub enum ContentBlock {
 
 impl ContentBlock {
     pub fn text(s: impl Into<String>) -> Self {
-        Self::Text { text: s.into() }
+        Self::Text { text: s.into(), cache_control: None }
+    }
+
+    /// Mark this block as a prompt-cache breakpoint, if it's a variant that
+    /// supports one. A no-op on `Thinking`/`ToolUse`/`Unknown` — see the
+    /// `cache_control` field doc on [`ContentBlock::Text`] for why those
+    /// never need it.
+    pub fn mark_cached(&mut self) {
+        match self {
+            Self::Text { cache_control, .. } | Self::ToolResult { cache_control, .. } => {
+                *cache_control = Some(CacheControl::ephemeral());
+            }
+            _ => {}
+        }
     }
 }
 
@@ -325,7 +342,7 @@ impl Response {
         self.content
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::Text { text } => Some(text.as_str()),
+                ContentBlock::Text { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -359,4 +376,56 @@ pub struct ApiErrorBody {
     pub r#type: String,
     #[serde(default)]
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mark_cached_sets_it_on_text_and_tool_result() {
+        let mut text = ContentBlock::text("hi");
+        text.mark_cached();
+        assert!(matches!(text, ContentBlock::Text { cache_control: Some(_), .. }));
+
+        let mut result = ContentBlock::ToolResult {
+            tool_use_id: "1".to_string(),
+            content: "ok".to_string(),
+            is_error: false,
+            cache_control: None,
+        };
+        result.mark_cached();
+        assert!(matches!(result, ContentBlock::ToolResult { cache_control: Some(_), .. }));
+    }
+
+    #[test]
+    fn mark_cached_is_a_no_op_on_thinking_and_tool_use() {
+        // Neither variant has a `cache_control` field to assert on directly,
+        // so the meaningful check is that `mark_cached` doesn't touch (or
+        // panic on) the fields they do have.
+        let mut thinking = ContentBlock::Thinking { thinking: "hmm".to_string(), signature: None };
+        thinking.mark_cached();
+        match thinking {
+            ContentBlock::Thinking { thinking, signature } => {
+                assert_eq!(thinking, "hmm");
+                assert!(signature.is_none());
+            }
+            _ => unreachable!(),
+        }
+
+        let mut tool_use = ContentBlock::ToolUse {
+            id: "1".to_string(),
+            name: "read".to_string(),
+            input: serde_json::json!({}),
+        };
+        tool_use.mark_cached();
+        match tool_use {
+            ContentBlock::ToolUse { id, name, input } => {
+                assert_eq!(id, "1");
+                assert_eq!(name, "read");
+                assert_eq!(input, serde_json::json!({}));
+            }
+            _ => unreachable!(),
+        }
+    }
 }

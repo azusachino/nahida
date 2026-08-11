@@ -6,7 +6,7 @@ use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
 
 use crate::stream::{SseDecoder, StreamEvent};
-use crate::types::{API_VERSION, ApiErrorBody, DEFAULT_MODEL, Request, Response};
+use crate::types::{API_VERSION, ApiErrorBody, ContentBlock, DEFAULT_MODEL, Request, Response};
 
 const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 
@@ -125,6 +125,15 @@ impl Dialect {
         }
         for tool in &mut req.tools {
             tool.cache_control = None;
+        }
+        for message in &mut req.messages {
+            for block in &mut message.content {
+                if let ContentBlock::Text { cache_control, .. }
+                | ContentBlock::ToolResult { cache_control, .. } = block
+                {
+                    *cache_control = None;
+                }
+            }
         }
     }
 }
@@ -369,18 +378,27 @@ fn api_error(status: u16, body: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Effort, OutputConfig, SystemBlock, Thinking};
+    use crate::types::{CacheControl, Effort, Message, OutputConfig, SystemBlock, Thinking};
 
     fn request() -> Request {
+        let mut last_block = ContentBlock::text("hi");
+        last_block.mark_cached();
         Request {
             model: "m".to_string(),
             max_tokens: 100,
             system: vec![SystemBlock::new("hi").cached()],
-            messages: vec![],
+            messages: vec![Message::user(vec![last_block])],
             tools: vec![],
             output_config: Some(OutputConfig { effort: Some(Effort::High) }),
             thinking: Some(Thinking::summarized()),
             stream: true,
+        }
+    }
+
+    fn message_cache_control(req: &Request) -> Option<&CacheControl> {
+        match &req.messages[0].content[0] {
+            ContentBlock::Text { cache_control, .. } => cache_control.as_ref(),
+            _ => panic!("expected a Text block"),
         }
     }
 
@@ -391,6 +409,7 @@ mod tests {
         assert!(req.output_config.is_none());
         assert!(req.thinking.is_none());
         assert!(req.system[0].cache_control.is_none());
+        assert!(message_cache_control(&req).is_none());
     }
 
     #[test]
@@ -400,6 +419,7 @@ mod tests {
         assert!(req.output_config.is_some());
         assert!(req.thinking.is_some());
         assert!(req.system[0].cache_control.is_some());
+        assert!(message_cache_control(&req).is_some());
     }
 
     #[test]
