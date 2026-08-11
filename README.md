@@ -77,17 +77,32 @@ nahida [PROMPT...]
                              on a real context-overflow error
       --thinking            stream summarized reasoning
   -v, --verbose             turn boundaries, token usage, tool results
+      --json                one JSON-encoded event per line to stdout, instead
+                             of human-readable rendering
+  -c, --continue            resume the most recent session for this --root
+      --resume <ID>         resume a specific session by id (overrides -c)
+      --no-session          don't read or write a session log for this run
 ```
 
 Ctrl-C interrupts the current turn and keeps the session; twice quits.
 
+## Sessions
+
+Every run is logged to a JSONL file under `$XDG_DATA_HOME/nahida/sessions`
+(falling back to `~/.local/share`) — a header line, then one line per
+message, appended as the transcript grows. `-c`/`--continue` picks the most
+recent session for the current `--root`; `--resume <ID>` picks one by id
+(printed at startup with `--verbose`). `--no-session` skips logging
+entirely. One writer, no branching — just the transcript, mirrored to disk.
+
 ## What it can do
 
-Four tools — `read`, `write`, `edit`, and `bash` — which together let it look
-at a project, change it precisely or wholesale, and check its own work.
-`edit` replaces exact text rather than the whole file, and refuses instead of
-guessing if what it expected to find has changed. Every path is confined to
-the workspace root.
+Seven tools — `read`, `write`, `edit`, `bash`, `find`, `grep`, and `ls` —
+which together let it look at a project, change it precisely or wholesale,
+and check its own work. `edit` replaces exact text rather than the whole
+file, and refuses instead of guessing if what it expected to find has
+changed. `find` and `grep` walk the tree gitignore-aware, the way `git
+status` would. Every path is confined to the workspace root.
 
 `bash` runs with this process's privileges. In an interactive session it asks
 first — every call needs a `y`/`N` before it runs — but that gate is
