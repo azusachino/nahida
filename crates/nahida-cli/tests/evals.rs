@@ -16,7 +16,7 @@
 use std::path::Path;
 
 use nahida_agent::{Agent, Cancel};
-use nahida_llm::{Client, ContentBlock, Message};
+use nahida_llm::{ContentBlock, Message};
 use nahida_tools::Sandbox;
 
 /// Run `prompt` against a real provider in a scratch workspace seeded by
@@ -30,11 +30,11 @@ async fn run_eval(
     setup(dir.path());
 
     let sandbox = Sandbox::new(dir.path()).expect("sandbox");
-    let client = Client::from_env()
+    let provider = nahida_llm::resolve()
         .expect("no credentials — set ANTHROPIC_API_KEY, ZAI_API_KEY, or ANTHROPIC_AUTH_TOKEN");
-    let profile = client.profile().clone();
+    let profile = provider.profile().clone();
 
-    let agent = Agent::new(client)
+    let agent = Agent::new(provider)
         .model(&profile.default_model)
         .system(include_str!("../src/prompt.md"))
         .tools(nahida_tools::default_set(&sandbox))

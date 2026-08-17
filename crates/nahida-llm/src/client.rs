@@ -1,4 +1,10 @@
-//! HTTP transport, credential resolution, and wire dialects.
+//! HTTP transport for the Anthropic Messages wire format, credential
+//! resolution for first-party Anthropic specifically, and dialect stripping.
+//!
+//! Which *provider* to use at all — first-party Anthropic, a Bearer-auth
+//! gateway, a different wire format entirely — is [`crate::provider`]'s job.
+//! This module only knows how to speak Anthropic Messages once a provider has
+//! already been chosen.
 
 use std::collections::VecDeque;
 
@@ -8,14 +14,7 @@ use serde::Deserialize;
 use crate::stream::{SseDecoder, StreamEvent};
 use crate::types::{API_VERSION, ApiErrorBody, ContentBlock, DEFAULT_MODEL, Request, Response};
 
-const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
-
-/// Z.ai's Anthropic-compatible endpoint, used by the coding plan.
-///
-/// Not verified against a checked-in reference — `refs/crush` pulls provider
-/// metadata from a remote registry at runtime, so no base URL is in its tree.
-/// Confirm against the Z.ai dashboard; `ANTHROPIC_BASE_URL` overrides it.
-const ZAI_BASE_URL: &str = "https://api.z.ai/api/anthropic";
+pub(crate) const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -97,7 +96,7 @@ pub enum Dialect {
 
 impl Dialect {
     /// Guess from the host. A gateway is anything that is not Anthropic's own.
-    fn infer(base_url: &str) -> Self {
+    pub(crate) fn infer(base_url: &str) -> Self {
         let authority = base_url.split_once("://").map_or(base_url, |(_, rest)| rest);
         let host = authority.split('/').next().unwrap_or("");
         // Strip any :port so `localhost:8080` compares as a host.
@@ -105,7 +104,7 @@ impl Dialect {
         if host.ends_with("anthropic.com") { Self::Anthropic } else { Self::Compat }
     }
 
-    fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s {
             "anthropic" => Some(Self::Anthropic),
             "compat" => Some(Self::Compat),
@@ -153,8 +152,12 @@ pub struct Profile {
 /// How we authenticate. The two schemes use *different headers* — an OAuth or
 /// gateway token sent as `x-api-key` is a 401, which is a confusing way to learn
 /// this.
+///
+/// `pub(crate)` rather than private: [`crate::provider::resolve`] constructs
+/// this directly for the first-party-Anthropic case, which needs both variants
+/// (and the OAuth flag) in a way [`Client::bearer`] alone can't express.
 #[derive(Debug, Clone)]
-enum Auth {
+pub(crate) enum Auth {
     /// `sk-ant-…` on `x-api-key`.
     ApiKey(String),
     /// A bearer token on `Authorization`. First-party OAuth additionally needs
@@ -170,40 +173,11 @@ pub struct Client {
 }
 
 impl Client {
-    /// Resolve a provider from the environment. First match wins:
-    ///
-    /// | Variable | Provider |
-    /// |---|---|
-    /// | `ANTHROPIC_API_KEY` | first-party Anthropic |
-    /// | `ANTHROPIC_AUTH_TOKEN` | first-party via OAuth, or a gateway |
-    /// | `ZAI_API_KEY` | Z.ai coding plan (GLM) |
-    ///
-    /// `ANTHROPIC_BASE_URL` overrides the base URL and `NAHIDA_DIALECT`
-    /// (`anthropic` \| `compat`) overrides the inferred dialect.
-    pub fn from_env() -> Result<Self> {
-        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-
-        let (auth, mut profile) = if let Some(key) = env("ANTHROPIC_API_KEY") {
-            (Auth::ApiKey(key), anthropic_profile())
-        } else if let Some(token) = env("ANTHROPIC_AUTH_TOKEN") {
-            // Only first-party understands the OAuth beta header.
-            let oauth = env("ANTHROPIC_BASE_URL").is_none();
-            (Auth::Bearer { token, oauth }, anthropic_profile())
-        } else if let Some(key) = env("ZAI_API_KEY") {
-            (Auth::Bearer { token: key, oauth: false }, zai_profile())
-        } else {
-            return Err(Error::NoCredentials);
-        };
-
-        if let Some(url) = env("ANTHROPIC_BASE_URL") {
-            profile.dialect = Dialect::infer(&url);
-            profile.base_url = url;
-            profile.name = "custom";
-        }
-        if let Some(d) = env("NAHIDA_DIALECT").as_deref().and_then(Dialect::parse) {
-            profile.dialect = d;
-        }
-
+    /// Shared constructor. `pub(crate)` so [`crate::provider::resolve`] can
+    /// build the first-party-Anthropic case directly (it needs both `Auth`
+    /// variants and the OAuth flag, which [`Client::bearer`] alone can't
+    /// express) without duplicating the HTTP-client setup.
+    pub(crate) fn new(auth: Auth, profile: Profile) -> Result<Self> {
         Ok(Self {
             // Ten minutes matches the SDKs' default. A long thinking turn at
             // high effort can genuinely run for minutes.
@@ -213,17 +187,21 @@ impl Client {
         })
     }
 
-    /// Build a client against an explicit endpoint, bypassing the environment.
+    /// Build a client against an explicit endpoint with bearer auth,
+    /// bypassing environment resolution.
     ///
-    /// This exists so tests can point the loop at a fake provider: `from_env`
-    /// reads process-global state, which cannot be set per-test without making
-    /// the suite serial.
+    /// This exists so tests can point the loop at a fake provider without
+    /// touching process-global environment state, which can't be set
+    /// per-test without making the suite serial.
     pub fn bearer(token: impl Into<String>, profile: Profile) -> Result<Self> {
-        Ok(Self {
-            http: reqwest::Client::builder().timeout(std::time::Duration::from_mins(10)).build()?,
-            auth: Auth::Bearer { token: token.into(), oauth: false },
-            profile,
-        })
+        Self::new(Auth::Bearer { token: token.into(), oauth: false }, profile)
+    }
+
+    /// Build a client against first-party Anthropic with an API key,
+    /// bypassing environment resolution — for embedding this crate directly.
+    /// [`crate::provider::resolve`] is what `nahida-cli` actually uses.
+    pub fn anthropic(api_key: impl Into<String>) -> Result<Self> {
+        Self::new(Auth::ApiKey(api_key.into()), anthropic_profile())
     }
 
     pub fn profile(&self) -> &Profile {
@@ -337,26 +315,30 @@ struct StreamState<S> {
     body_done: bool,
 }
 
-fn anthropic_profile() -> Profile {
+#[async_trait::async_trait]
+impl crate::provider::Provider for Client {
+    fn profile(&self) -> &Profile {
+        Client::profile(self)
+    }
+
+    /// Delegates to the inherent [`Client::stream`], boxing the result —
+    /// `impl Trait` return position isn't expressible in a trait method
+    /// without it. The loop only ever reaches this through the trait object;
+    /// anything holding a concrete `Client` can still call the inherent
+    /// method directly and get the unboxed stream.
+    async fn stream(&self, req: &Request) -> Result<crate::provider::EventStream> {
+        let events = Client::stream(self, req).await?;
+        Ok(Box::pin(events))
+    }
+}
+
+pub(crate) fn anthropic_profile() -> Profile {
     Profile {
         name: "anthropic",
         base_url: ANTHROPIC_BASE_URL.to_string(),
         dialect: Dialect::Anthropic,
         default_model: DEFAULT_MODEL.to_string(),
         default_max_tokens: 64_000,
-    }
-}
-
-fn zai_profile() -> Profile {
-    Profile {
-        name: "zai",
-        base_url: ZAI_BASE_URL.to_string(),
-        dialect: Dialect::Compat,
-        // `glm-5.1` is the model refs/crush exercises in its own agent tests, so
-        // it is known to work against an Anthropic-shaped coding agent.
-        // `glm-5.2` is newer (1M context); `glm-5` caps output at ~20k.
-        default_model: "glm-5.1".to_string(),
-        default_max_tokens: 32_000,
     }
 }
 
