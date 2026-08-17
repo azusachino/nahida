@@ -20,8 +20,9 @@ pub(crate) const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 pub enum Error {
     #[error(
         "no credentials found. Set one of:\n\
-         \x20 ANTHROPIC_API_KEY   — first-party Anthropic\n\
-         \x20 ZAI_API_KEY         — Z.ai coding plan (GLM)\n\
+         \x20 ANTHROPIC_API_KEY       — first-party Anthropic\n\
+         \x20 ZAI_API_KEY             — Z.ai coding plan (GLM), global\n\
+         \x20 ZAI_CODING_CN_API_KEY   — Z.ai coding plan (GLM), China region\n\
          \x20 ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL — any compatible gateway"
     )]
     NoCredentials,
@@ -142,6 +143,10 @@ impl Dialect {
 pub struct Profile {
     pub name: &'static str,
     pub base_url: String,
+    /// Only meaningful for a provider speaking the Anthropic Messages wire
+    /// format — a provider on a different wire format (see
+    /// [`crate::provider::Provider`]) has no dialect of its own and fills
+    /// this with [`Dialect::Compat`] as an informational placeholder.
     pub dialect: Dialect,
     pub default_model: String,
     /// Output ceilings vary a lot between providers; 64k is safe on Opus 5 and

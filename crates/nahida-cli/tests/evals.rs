@@ -5,7 +5,9 @@
 //! These ask a different question: given a real task, does the agent actually
 //! get it right? That needs a real model call, which costs tokens and money,
 //! so every eval here is `#[ignore]`d and never runs from `make check` or CI.
-//! Run them deliberately with `make eval`.
+//! Run them deliberately with `make eval`, which uses whatever provider
+//! [`nahida_llm::resolve`] picks up from the environment and that provider's
+//! own default model, unless `NAHIDA_EVAL_MODEL` overrides the model.
 //!
 //! Add a task by writing a new `#[tokio::test]` that calls [`run_eval`] with a
 //! prompt, a fixture setup closure, and a check closure. Keep checks as simple
@@ -33,9 +35,14 @@ async fn run_eval(
     let provider = nahida_llm::resolve()
         .expect("no credentials — set ANTHROPIC_API_KEY, ZAI_API_KEY, or ANTHROPIC_AUTH_TOKEN");
     let profile = provider.profile().clone();
+    // The resolved provider's own default otherwise silently wins even when
+    // you meant to eval a different model on the same provider (e.g. a
+    // specific GLM point release) -- there's no other override on this path.
+    let model =
+        std::env::var("NAHIDA_EVAL_MODEL").unwrap_or_else(|_| profile.default_model.clone());
 
     let agent = Agent::new(provider)
-        .model(&profile.default_model)
+        .model(&model)
         .system(include_str!("../src/prompt.md"))
         .tools(nahida_tools::default_set(&sandbox))
         .max_tokens(profile.default_max_tokens)

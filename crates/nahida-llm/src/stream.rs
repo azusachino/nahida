@@ -227,8 +227,19 @@ impl Accumulator {
                     self.stop_details = Some(d.clone());
                 }
                 if let Some(u) = usage {
-                    // Output tokens are reported here, incrementally.
+                    // Output tokens are reported here, incrementally, for
+                    // Anthropic. Anthropic never reports input tokens on this
+                    // event (only in MessageStart, once) -- a provider that
+                    // only knows total usage at the *end* of the stream
+                    // (OpenAI Chat Completions) reports both together here
+                    // instead, in one final usage-carrying delta. Accept a
+                    // nonzero input_tokens as that case rather than letting a
+                    // zeroed-out Anthropic field clobber what MessageStart
+                    // already set.
                     self.usage.output_tokens = u.output_tokens;
+                    if u.input_tokens > 0 {
+                        self.usage.input_tokens = u.input_tokens;
+                    }
                 }
             }
             StreamEvent::ContentBlockStop { .. }
@@ -343,6 +354,49 @@ mod tests {
         assert_eq!(uses.len(), 1);
         assert_eq!(uses[0].1, "read");
         assert_eq!(uses[0].2["path"], "a.rs");
+    }
+
+    #[test]
+    fn a_message_start_with_no_usage_then_a_final_delta_with_usage_sets_input_tokens() {
+        // The shape a translated OpenAI stream produces: input tokens are
+        // only known at the very end, not up front.
+        let events: Vec<StreamEvent> = [
+            r#"{"type":"message_start","message":{"id":"m1","model":"glm-5.3","usage":{}}}"#,
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}"#,
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":42,"output_tokens":3}}"#,
+        ]
+        .iter()
+        .map(|s| serde_json::from_str(s).expect("event parses"))
+        .collect();
+
+        let mut acc = Accumulator::new();
+        for e in &events {
+            acc.apply(e);
+        }
+        let resp = acc.finish();
+        assert_eq!(resp.usage.input_tokens, 42);
+        assert_eq!(resp.usage.output_tokens, 3);
+    }
+
+    #[test]
+    fn a_zero_input_tokens_delta_does_not_clobber_message_starts_real_count() {
+        // The Anthropic shape: input tokens land in MessageStart; every
+        // MessageDelta's usage always reports input_tokens: 0 (the field is
+        // simply absent from the real payload), which must not overwrite it.
+        let events: Vec<StreamEvent> = [
+            r#"{"type":"message_start","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":10}}}"#,
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}"#,
+        ]
+        .iter()
+        .map(|s| serde_json::from_str(s).expect("event parses"))
+        .collect();
+
+        let mut acc = Accumulator::new();
+        for e in &events {
+            acc.apply(e);
+        }
+        assert_eq!(acc.finish().usage.input_tokens, 10);
     }
 
     #[test]
