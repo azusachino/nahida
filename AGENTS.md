@@ -15,7 +15,9 @@ exactly one home, and each new one lands on something that already runs.
 
 **One crate, one concept. A crate may not know what the crate above it does.**
 
-`nahida-llm` knows the Anthropic Messages API and does not know what an agent is.
+`nahida-llm` knows how to talk to a model provider — Anthropic Messages, OpenAI
+Chat Completions, whichever wire format a given provider actually speaks,
+behind one `Provider` trait — and does not know what an agent is.
 `nahida-agent` knows turns and tools and does not know what a file or a terminal
 is. `nahida-tools` knows the filesystem. `nahida-cli` knows the terminal.
 
@@ -29,7 +31,7 @@ usually in the wrong crate.
 
 | Path | What it is |
 | --- | --- |
-| `crates/nahida-llm/` | Provider: wire types, auth, dialects, SSE streaming |
+| `crates/nahida-llm/` | Provider abstraction (`Provider` trait, a small registry), two wire formats (Anthropic Messages, OpenAI Chat Completions), auth, dialects, SSE streaming |
 | `crates/nahida-agent/` | The loop: turns, tool dispatch, cancellation, events |
 | `crates/nahida-tools/` | `read`, `write`, `edit`, `bash`, `find`, `grep`, `ls`, and path confinement |
 | `crates/nahida-cli/` | The `nahida` binary: flags, REPL, rendering, `@file` expansion, session persistence |
@@ -48,6 +50,18 @@ its remote-session support: `ai` → `agent` → `coding-agent` there is
 and `telemetry` has no consumer nahida needs — both are deliberately not
 ported; adding them here would be structure with nothing using it.
 
+`nahida-llm`'s own internal shape now mirrors a scoped slice of pi's `ai`
+package the same way: a `Provider` trait plus a small declarative registry,
+not `pi-ai`'s actual scale. `pi-ai` is a real multi-provider SDK — ~28 wire
+formats, an OAuth framework with interactive credential prompts, model
+catalogs with dynamic refresh, cost tracking. None of that is here. Two wire
+formats exist because nahida needs two (Anthropic Messages; OpenAI Chat
+Completions, for the Z.ai China coding plan, which speaks no other format);
+a third gets added the same way, when something real needs it — not because
+the shape now "supports multiple providers" in the abstract. Reading this as
+"we ported pi-ai" would be exactly the mistake the concept map's own history
+warns against making with pi at any layer.
+
 ## The concept map
 
 Where each idea lives, and which are still to come. Tracked as
@@ -56,6 +70,7 @@ Where each idea lives, and which are still to come. Tracked as
 | Concept | Where | Status |
 | --- | --- | --- |
 | Provider abstraction, streaming, dialects | `nahida-llm` | done |
+| A second wire format (OpenAI Chat Completions), for the Z.ai China coding plan | `nahida-llm/src/openai.rs`, `provider.rs`'s registry | done |
 | The agent loop, `stop_reason`, cancellation | `nahida-agent/agent.rs` | done |
 | Tool schemas and parallel dispatch | `nahida-agent/tool.rs`, `nahida-tools` | done |
 | Staleness-checked edit (targeted replacement, not a blind overwrite) | `nahida-tools/src/edit.rs` | done |
