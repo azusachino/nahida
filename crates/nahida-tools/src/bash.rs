@@ -143,3 +143,99 @@ impl Tool for Bash {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sandbox() -> (tempfile::TempDir, Sandbox) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sb = Sandbox::new(dir.path()).expect("sandbox");
+        (dir, sb)
+    }
+
+    async fn bash(sb: &Sandbox, input: serde_json::Value) -> ToolOutcome {
+        Bash::new(sb.clone()).call(input).await
+    }
+
+    #[tokio::test]
+    async fn captures_stdout_on_success() {
+        let (_dir, sb) = sandbox();
+
+        let out = bash(&sb, serde_json::json!({"command": "echo hi"})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("hi"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn a_non_zero_exit_is_an_error_result_not_a_tool_malfunction() {
+        let (_dir, sb) = sandbox();
+
+        let out = bash(&sb, serde_json::json!({"command": "exit 7"})).await;
+
+        assert!(out.is_error);
+        assert!(out.content.contains("[exit status 7]"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn stderr_is_captured_alongside_stdout() {
+        let (_dir, sb) = sandbox();
+
+        let out = bash(&sb, serde_json::json!({"command": "echo err 1>&2"})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("err"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn no_output_is_reported_explicitly() {
+        let (_dir, sb) = sandbox();
+
+        let out = bash(&sb, serde_json::json!({"command": "true"})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("(no output)"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn runs_with_the_sandbox_root_as_cwd() {
+        let (dir, sb) = sandbox();
+        std::fs::write(dir.path().join("marker.txt"), "").expect("seed");
+
+        let out = bash(&sb, serde_json::json!({"command": "ls marker.txt"})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("marker.txt"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn missing_command_is_an_error() {
+        let (_dir, sb) = sandbox();
+
+        let out = bash(&sb, serde_json::json!({})).await;
+
+        assert!(out.is_error);
+        assert!(out.content.contains("command"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn a_command_over_its_timeout_is_killed() {
+        let (_dir, sb) = sandbox();
+
+        let out = bash(&sb, serde_json::json!({"command": "sleep 5", "timeout_ms": 50})).await;
+
+        assert!(out.is_error);
+        assert!(out.content.contains("killed after 50ms"), "got {}", out.content);
+    }
+
+    #[test]
+    fn always_requires_confirmation_regardless_of_input() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sb = Sandbox::new(dir.path()).expect("sandbox");
+        let bash = Bash::new(sb);
+
+        assert!(bash.requires_confirmation(&serde_json::json!({"command": "ls"})));
+        assert!(bash.requires_confirmation(&serde_json::json!({})));
+    }
+}

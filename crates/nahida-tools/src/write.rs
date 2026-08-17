@@ -84,3 +84,80 @@ impl Tool for Write {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sandbox() -> (tempfile::TempDir, Sandbox) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sb = Sandbox::new(dir.path()).expect("sandbox");
+        (dir, sb)
+    }
+
+    async fn write(sb: &Sandbox, input: serde_json::Value) -> ToolOutcome {
+        Write::new(sb.clone()).call(input).await
+    }
+
+    #[tokio::test]
+    async fn creates_a_new_file() {
+        let (dir, sb) = sandbox();
+
+        let out = write(&sb, serde_json::json!({"path": "f.txt", "content": "hi\n"})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.starts_with("created"), "got {}", out.content);
+        assert_eq!(std::fs::read_to_string(dir.path().join("f.txt")).unwrap(), "hi\n");
+    }
+
+    #[tokio::test]
+    async fn overwrites_an_existing_file() {
+        let (dir, sb) = sandbox();
+        std::fs::write(dir.path().join("f.txt"), "old\n").expect("seed");
+
+        let out = write(&sb, serde_json::json!({"path": "f.txt", "content": "new\n"})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.starts_with("overwrote"), "got {}", out.content);
+        assert_eq!(std::fs::read_to_string(dir.path().join("f.txt")).unwrap(), "new\n");
+    }
+
+    #[tokio::test]
+    async fn creates_missing_parent_directories() {
+        let (dir, sb) = sandbox();
+
+        let out = write(&sb, serde_json::json!({"path": "a/b/c.txt", "content": "deep\n"})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert_eq!(std::fs::read_to_string(dir.path().join("a/b/c.txt")).unwrap(), "deep\n");
+    }
+
+    #[tokio::test]
+    async fn an_empty_file_is_legitimate() {
+        let (dir, sb) = sandbox();
+
+        let out = write(&sb, serde_json::json!({"path": "empty.txt", "content": ""})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert_eq!(std::fs::read_to_string(dir.path().join("empty.txt")).unwrap(), "");
+    }
+
+    #[tokio::test]
+    async fn missing_content_key_is_an_error_distinct_from_empty_content() {
+        let (_dir, sb) = sandbox();
+
+        let out = write(&sb, serde_json::json!({"path": "f.txt"})).await;
+
+        assert!(out.is_error);
+        assert!(out.content.contains("content"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn a_path_outside_the_sandbox_is_refused() {
+        let (_dir, sb) = sandbox();
+
+        let out = write(&sb, serde_json::json!({"path": "../outside.txt", "content": "x"})).await;
+
+        assert!(out.is_error);
+    }
+}

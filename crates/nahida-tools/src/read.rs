@@ -119,3 +119,90 @@ impl Tool for Read {
         ToolOutcome::ok(out)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sandbox() -> (tempfile::TempDir, Sandbox) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sb = Sandbox::new(dir.path()).expect("sandbox");
+        (dir, sb)
+    }
+
+    async fn read(sb: &Sandbox, input: serde_json::Value) -> ToolOutcome {
+        Read::new(sb.clone()).call(input).await
+    }
+
+    #[tokio::test]
+    async fn reads_a_whole_small_file_with_line_numbers() {
+        let (dir, sb) = sandbox();
+        std::fs::write(dir.path().join("f.txt"), "one\ntwo\nthree\n").expect("seed");
+
+        let out = read(&sb, serde_json::json!({"path": "f.txt"})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("1\tone"), "got {}", out.content);
+        assert!(out.content.contains("3\tthree"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn paginates_with_offset_and_limit() {
+        let (dir, sb) = sandbox();
+        let mut body = String::new();
+        for n in 1..=10 {
+            writeln!(body, "line{n}").expect("write");
+        }
+        std::fs::write(dir.path().join("f.txt"), body).expect("seed");
+
+        let out = read(&sb, serde_json::json!({"path": "f.txt", "offset": 3, "limit": 2})).await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("3\tline3"), "got {}", out.content);
+        assert!(out.content.contains("4\tline4"), "got {}", out.content);
+        assert!(!out.content.contains("5\tline5"), "got {}", out.content);
+        assert!(out.content.contains("call again with offset 5"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn offset_past_the_end_is_an_error() {
+        let (dir, sb) = sandbox();
+        std::fs::write(dir.path().join("f.txt"), "one\ntwo\n").expect("seed");
+
+        let out = read(&sb, serde_json::json!({"path": "f.txt", "offset": 50})).await;
+
+        assert!(out.is_error);
+        assert!(out.content.contains("past the end"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn missing_path_is_an_error() {
+        let (_dir, sb) = sandbox();
+
+        let out = read(&sb, serde_json::json!({})).await;
+
+        assert!(out.is_error);
+        assert!(out.content.contains("path"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_is_an_error_not_a_panic() {
+        let (_dir, sb) = sandbox();
+
+        let out = read(&sb, serde_json::json!({"path": "nope.txt"})).await;
+
+        assert!(out.is_error);
+        assert!(out.content.contains("cannot read"), "got {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn non_utf8_content_is_refused_not_returned_as_mojibake() {
+        let (dir, sb) = sandbox();
+        std::fs::write(dir.path().join("bin.dat"), [0xFF, 0xFE, 0x00, 0xFF]).expect("seed");
+
+        let out = read(&sb, serde_json::json!({"path": "bin.dat"})).await;
+
+        assert!(out.is_error);
+        assert!(out.content.contains("not valid UTF-8"), "got {}", out.content);
+    }
+}
