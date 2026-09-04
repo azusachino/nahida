@@ -14,9 +14,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context as _, Result};
 use nahida_llm::Message;
 
-/// The `Line::Header` shape below. Bumping this is a breaking change to every
-/// session already on disk — `nahida --describe` reports it precisely so that
-/// is visible before it bites someone resuming an old session.
+/// The `Line::Header` shape below. `nahida --describe` reports this number
+/// for visibility, but nothing reads or checks it yet — `SessionStore::resume`
+/// accepts any header regardless of `version`. Bumping this would be a
+/// breaking change to every session already on disk; actually enforcing that
+/// (rejecting or migrating a mismatched version) is exactly the gap
+/// ADR-0001 names as still open, not something this constant closes by
+/// existing. Reporting it now is a head start on that, not the fix itself.
 pub const SESSION_FORMAT_VERSION: u32 = 1;
 
 #[derive(serde::Serialize, serde::Deserialize)]
