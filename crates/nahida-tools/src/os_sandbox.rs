@@ -46,10 +46,16 @@ mod linux {
     /// unrelated kernel config choice would be the wrong failure mode.
     /// `log` is called once, only when that happens, so the caller can
     /// surface it without this module knowing what a terminal is.
+    ///
+    /// Returns whether confinement actually ended up fully enforced — `Ok`
+    /// alone only means the Landlock calls themselves didn't hard-error, not
+    /// that writes are actually confined (that's the degraded case `log`
+    /// reports). A caller that needs to know "is this real" (`nahida
+    /// --describe`, for one) has to check the bool, not just `.is_ok()`.
     pub fn confine_writes(
         workspace_root: &Path,
         log: impl FnOnce(&str),
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let abi = ABI::V5;
 
         let status = Ruleset::default()
@@ -60,12 +66,13 @@ mod linux {
             .add_rule(PathBeneath::new(PathFd::new(workspace_root)?, AccessFs::from_all(abi)))?
             .restrict_self()?;
 
-        if status.ruleset != RulesetStatus::FullyEnforced {
+        let enforced = status.ruleset == RulesetStatus::FullyEnforced;
+        if !enforced {
             log("landlock: not fully enforced on this kernel — bash runs without OS-level \
                  write confinement (permission gating still applies)");
         }
 
-        Ok(())
+        Ok(enforced)
     }
 }
 
@@ -89,7 +96,9 @@ mod linux_tests {
         let workspace = tempfile::tempdir().expect("tempdir");
         let outside = tempfile::NamedTempFile::new().expect("outside tempfile");
 
-        confine_writes(workspace.path(), |msg| eprintln!("{msg}")).expect("confine_writes");
+        let enforced =
+            confine_writes(workspace.path(), |msg| eprintln!("{msg}")).expect("confine_writes");
+        assert!(enforced, "this test's whole premise is that it actually got enforced");
 
         // Inside the confined root: still writable.
         std::fs::write(workspace.path().join("ok.txt"), b"hi")
@@ -107,13 +116,13 @@ mod linux_tests {
 }
 
 /// No-op on every platform except Linux — see the module doc for why macOS
-/// has no equivalent yet.
+/// has no equivalent yet. Always reports `Ok(false)`: never enforced here.
 #[cfg(not(target_os = "linux"))]
 pub fn confine_writes(
     _workspace_root: &std::path::Path,
     log: impl FnOnce(&str),
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
     log("OS-level write confinement is Linux-only (Landlock) — not applied on this platform. \
          Permission gating still applies to bash.");
-    Ok(())
+    Ok(false)
 }
