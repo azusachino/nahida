@@ -20,12 +20,13 @@ make run
 
 ## Providers
 
-nahida speaks the Anthropic Messages API. That format is also what several
-gateways implement, so more than one provider works — but they do not implement
-the same *features*, which is what `Dialect` is for: on a compatible endpoint,
-Anthropic-only fields (`output_config.effort`, adaptive `thinking`,
-`cache_control`) are stripped before the request goes out rather than gambling on
-whether the gateway ignores or rejects them.
+nahida speaks two wire formats, behind one `Provider` trait: Anthropic
+Messages and OpenAI Chat Completions. Most gateways implement the Anthropic
+shape, which is also what several compatible endpoints implement — but they
+do not all implement the same *features*, which is what `Dialect` is for: on
+a compatible endpoint, Anthropic-only fields (`output_config.effort`,
+adaptive `thinking`, `cache_control`) are stripped before the request goes
+out rather than gambling on whether the gateway ignores or rejects them.
 
 **Anthropic**
 
@@ -34,7 +35,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 make run ARGS="..."                      # defaults to claude-opus-5
 ```
 
-**Z.ai coding plan (GLM)**
+**Z.ai coding plan (GLM), global**
 
 ```bash
 export ZAI_API_KEY=...
@@ -46,10 +47,19 @@ agent tests, so it is known to work behind an Anthropic-shaped tool loop.
 `glm-5.2` is newer with a 1M context window; `glm-5` caps output near 20k tokens,
 so pass `--max-tokens` if you use it.
 
-The Z.ai base URL is a best guess (`https://api.z.ai/api/anthropic`) — crush pulls
-provider metadata from a remote registry, so there is nothing checked in to
-confirm it against. If requests 404, take the URL from your Z.ai dashboard and
-override it with `ANTHROPIC_BASE_URL`.
+**Z.ai coding plan (GLM), China region**
+
+```bash
+export ZAI_CODING_CN_API_KEY=...
+make run ARGS="..."                      # defaults to glm-5.3
+```
+
+A different domain from the global plan above (`open.bigmodel.cn`, not
+`api.z.ai`) speaking a different wire format entirely — confirmed against
+`refs/pi`'s own `zai-coding-cn` provider, which uses OpenAI Chat Completions
+exclusively for this endpoint, not Anthropic Messages. `--effort`/`--thinking`
+are silent no-ops here (OpenAI Chat Completions has no equivalent), the same
+as any `Compat`-dialect Anthropic gateway.
 
 **Any other compatible endpoint**
 

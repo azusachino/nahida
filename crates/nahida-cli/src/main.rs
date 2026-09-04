@@ -16,7 +16,7 @@ use anyhow::{Context as _, Result};
 use clap::Parser;
 use confirm::TerminalConfirm;
 use nahida_agent::{Agent, AgentError, Cancel};
-use nahida_llm::{Client, ContentBlock, Effort, Message};
+use nahida_llm::{ContentBlock, Effort, Message};
 use nahida_tools::Sandbox;
 use render::Renderer;
 use session::SessionStore;
@@ -116,8 +116,8 @@ async fn main() -> Result<()> {
 
     // The credential error is the one a new user hits first, so let it speak for
     // itself instead of wrapping it in context.
-    let client = Client::from_env()?;
-    let profile = client.profile().clone();
+    let provider = nahida_llm::resolve()?;
+    let profile = provider.profile().clone();
 
     let model = cli.model.unwrap_or_else(|| profile.default_model.clone());
     let max_tokens = cli.max_tokens.unwrap_or(profile.default_max_tokens);
@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    let mut agent = Agent::new(client)
+    let mut agent = Agent::new(provider)
         .model(&model)
         .system(include_str!("prompt.md"))
         .tools(nahida_tools::default_set(&sandbox))

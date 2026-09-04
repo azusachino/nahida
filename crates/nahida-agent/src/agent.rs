@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use nahida_llm::{
-    Accumulator, Client, ContentBlock, Delta, Effort, Message, OutputConfig, Request, Response,
+    Accumulator, ContentBlock, Delta, Effort, Message, OutputConfig, Provider, Request, Response,
     StopReason, StreamEvent, SystemBlock, Thinking, Usage,
 };
 
@@ -59,7 +59,7 @@ impl Outcome {
 }
 
 pub struct Agent {
-    client: Client,
+    provider: Box<dyn Provider>,
     model: String,
     system: Vec<SystemBlock>,
     tools: Vec<Arc<dyn Tool>>,
@@ -78,9 +78,13 @@ impl Agent {
     /// `max_tokens` defaults high because we always stream: the cap covers
     /// thinking *and* visible text together, and on Opus 5 thinking is on by
     /// default, so a tight cap truncates mid-answer.
-    pub fn new(client: Client) -> Self {
+    ///
+    /// Takes anything implementing [`Provider`] (a concrete `Client`, most
+    /// often) and boxes it — callers pass a value, never a `Box`, exactly as
+    /// before this crate could speak more than one wire format.
+    pub fn new(provider: impl Provider + 'static) -> Self {
         Self {
-            client,
+            provider: Box::new(provider),
             model: nahida_llm::DEFAULT_MODEL.to_string(),
             system: Vec::new(),
             tools: Vec::new(),
@@ -442,7 +446,7 @@ impl Agent {
         cancel: &Cancel,
         sink: &mut dyn FnMut(AgentEvent),
     ) -> Result<Response, AgentError> {
-        let mut events = Box::pin(self.client.stream(request).await?);
+        let mut events = self.provider.stream(request).await?;
         let mut acc = Accumulator::new();
 
         while let Some(event) = events.next().await {

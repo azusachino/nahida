@@ -9,11 +9,17 @@
 //! point is learning, that is the feature — the wire format is visible instead
 //! of behind a generated client.
 //!
+//! Talking to a specific, known provider (as below) means using [`Client`]
+//! directly. Letting the environment choose which provider — what
+//! `nahida-cli` actually does — is [`provider::resolve`]'s job instead; see
+//! [`provider`] for the abstraction that lets `nahida-agent` not care which
+//! one it got.
+//!
 //! ```no_run
 //! # async fn demo() -> Result<(), nahida_llm::Error> {
 //! use nahida_llm::{Client, Message, ContentBlock, Request, SystemBlock, DEFAULT_MODEL};
 //!
-//! let client = Client::from_env()?;
+//! let client = Client::anthropic(std::env::var("ANTHROPIC_API_KEY").unwrap())?;
 //! let response = client
 //!     .send(&Request {
 //!         model: DEFAULT_MODEL.to_string(),
@@ -32,10 +38,14 @@
 //! ```
 
 pub mod client;
+pub mod openai;
+pub mod provider;
 pub mod stream;
 pub mod types;
 
 pub use client::{Client, Dialect, Error, Profile, Result};
+pub use openai::OpenAiCompletionsProvider;
+pub use provider::{EventStream, Provider, resolve};
 pub use stream::{Accumulator, Delta, SseDecoder, StreamEvent};
 pub use types::{
     API_VERSION, CacheControl, ContentBlock, DEFAULT_MODEL, Effort, Message, OutputConfig, Request,

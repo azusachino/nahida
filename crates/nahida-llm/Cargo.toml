@@ -8,6 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 futures-util.workspace = true
 reqwest.workspace = true
 serde.workspace = true
