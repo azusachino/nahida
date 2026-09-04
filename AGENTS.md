@@ -73,6 +73,7 @@ Where each idea lives, and which are still to come. Tracked as
 | A second wire format (OpenAI Chat Completions), for the Z.ai China coding plan | `nahida-llm/src/openai.rs`, `provider.rs`'s registry | done |
 | The agent loop, `stop_reason`, cancellation | `nahida-agent/agent.rs` | done |
 | Tool schemas and parallel dispatch | `nahida-agent/tool.rs`, `nahida-tools` | done |
+| Per-call `ToolResult` events as each dispatch call finishes, not per batch (ADR-0001) | `Agent::dispatch`, via `FuturesUnordered` | done |
 | Staleness-checked edit (targeted replacement, not a blind overwrite) | `nahida-tools/src/edit.rs` | done |
 | Path confinement | `nahida-tools/sandbox.rs` | done |
 | Prompt caching (tools+system prefix breakpoint, plus a moving breakpoint on the growing transcript) | `Agent::system`, `ContentBlock::mark_cached`, `Agent::request` | done |
