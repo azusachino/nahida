@@ -36,7 +36,7 @@ usually in the wrong crate.
 | `crates/nahida-tools/` | `read`, `write`, `edit`, `bash`, `find`, `grep`, `ls`, and path confinement |
 | `crates/nahida-cli/` | The `nahida` binary: flags, REPL, rendering, `@file` expansion, session persistence |
 | `crates/*/src/*.md` | Tool descriptions and the system prompt, next to the code |
-| `docs/` | The 0-to-hero tutorial: a concept-by-concept walkthrough of this repo, MkDocs Material, `mise`+`uv`-managed and kept apart from the Rust devShell |
+| `docs/` | The 0-to-hero tutorial plus architecture decisions; tutorial tooling is `mise`+`uv`-managed and kept apart from the Rust devShell |
 
 Prompt text lives in `.md` files beside the code it describes and is pulled in
 with `include_str!`. Descriptions are load-bearing — they are how the model
