@@ -311,8 +311,12 @@ impl Agent {
 
                     transcript.push(Message::assistant(response.replayable()));
 
-                    for (_, name, input) in &calls {
-                        sink(AgentEvent::ToolCall { name: name.clone(), input: input.clone() });
+                    for (id, name, input) in &calls {
+                        sink(AgentEvent::ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            input: input.clone(),
+                        });
                     }
 
                     // `dispatch` emits a `ToolResult` event itself, the moment
@@ -473,6 +477,14 @@ impl Agent {
     /// time — because terminal interaction can't be parallelized the way
     /// tool execution can. A denial comes back as an error result, never a
     /// dropped one, same as an unknown tool.
+    ///
+    /// `sink` runs on the same task driving the `FuturesUnordered`, between
+    /// polls — a call that blocks (a slow `println!`, a full terminal) stalls
+    /// picking up the *next* completed future, not just rendering the one
+    /// that just finished. Every `sink` this crate is built to receive is
+    /// cheap (a `println!`, a JSON write, a channel send), so this hasn't
+    /// mattered in practice; it would if a caller ever handed `dispatch` a
+    /// sink that does real work.
     async fn dispatch(
         &self,
         calls: &[(String, String, serde_json::Value)],
@@ -531,8 +543,9 @@ impl Agent {
         let mut results: Vec<Option<ContentBlock>> = (0..calls.len()).map(|_| None).collect();
         let mut remaining = futures;
         while let Some((index, name, block)) = remaining.next().await {
-            if let ContentBlock::ToolResult { content, is_error, .. } = &block {
+            if let ContentBlock::ToolResult { tool_use_id, content, is_error, .. } = &block {
                 sink(AgentEvent::ToolResult {
+                    tool_use_id: tool_use_id.clone(),
                     name,
                     is_error: *is_error,
                     content: content.clone(),
