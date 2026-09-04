@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use nahida_agent::{Agent, AgentError, Cancel, Confirm, Tool, ToolOutcome};
+use nahida_agent::{Agent, AgentError, AgentEvent, Cancel, Confirm, Tool, ToolOutcome};
 use nahida_llm::{ContentBlock, Dialect, Message, StopReason};
 use support::{FakeProvider, Script, refusal_turn, text_turn, tool_use_turn, transcript_shape};
 
@@ -60,6 +60,33 @@ impl Tool for Spy {
     async fn call(&self, input: serde_json::Value) -> ToolOutcome {
         self.calls.lock().expect("lock").push(input);
         self.count.fetch_add(1, Ordering::Relaxed);
+        ToolOutcome::ok(format!("{} ran", self.name))
+    }
+}
+
+/// Finishes after `delay` — exists purely to give `dispatch` two calls with
+/// very different completion times, for the completion-order tests.
+struct Delayed {
+    name: &'static str,
+    delay: std::time::Duration,
+}
+
+#[async_trait]
+impl Tool for Delayed {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn description(&self) -> &str {
+        "a test tool that finishes after a delay"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}, "additionalProperties": true})
+    }
+
+    async fn call(&self, _input: serde_json::Value) -> ToolOutcome {
+        tokio::time::sleep(self.delay).await;
         ToolOutcome::ok(format!("{} ran", self.name))
     }
 }
@@ -269,6 +296,52 @@ async fn replays_the_assistant_turn_and_batches_results_into_one_user_message() 
     assert_eq!(results[1]["tool_use_id"], "t2");
     assert_eq!(results[0]["content"], "alpha ran");
     assert_eq!(results[1]["content"], "beta ran");
+}
+
+#[tokio::test]
+async fn a_fast_calls_result_event_fires_before_a_slower_ones_finishes() {
+    // Source order calls the slow tool first (t1) and the fast one second
+    // (t2). If `dispatch` still waited for the whole batch before emitting
+    // anything -- the bug this test exists to catch -- the two `ToolResult`
+    // events would carry no information about real completion order at all,
+    // and this assertion would pass or fail by coincidence rather than by
+    // design. It doesn't: the fast call actually finishes first, and its
+    // event must be observable before the slow one's.
+    let provider = FakeProvider::start(vec![
+        tool_use_turn(
+            "",
+            &[("t1", "slow", serde_json::json!({})), ("t2", "fast", serde_json::json!({}))],
+        ),
+        text_turn("done"),
+    ])
+    .await;
+
+    let slow = Arc::new(Delayed { name: "slow", delay: std::time::Duration::from_millis(50) });
+    let fast = Arc::new(Delayed { name: "fast", delay: std::time::Duration::ZERO });
+    let agent = agent(&provider, vec![slow, fast]);
+
+    let events: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&events);
+
+    let mut transcript = vec![Message::user(vec![ContentBlock::text("go")])];
+    agent
+        .run(&mut transcript, &Cancel::new(), &mut |event| {
+            if let AgentEvent::ToolResult { name, .. } = event {
+                recorded.lock().expect("lock").push(name);
+            }
+        })
+        .await
+        .expect("loop completes");
+
+    assert_eq!(events.lock().expect("lock").as_slice(), ["fast".to_string(), "slow".to_string()]);
+
+    // The persisted transcript is unaffected by any of this: results still
+    // land in source (call) order, not completion order, or they would
+    // attach to the wrong `tool_use` block.
+    let requests = provider.requests();
+    let results = &requests[1]["messages"][2]["content"];
+    assert_eq!(results[0]["tool_use_id"], "t1");
+    assert_eq!(results[1]["tool_use_id"], "t2");
 }
 
 #[tokio::test]
