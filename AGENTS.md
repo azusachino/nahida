@@ -86,6 +86,7 @@ Where each idea lives, and which are still to come. Tracked as
 | `@file` prompt expansion | `nahida-cli/src/prompt.rs` | done |
 | Machine-readable event stream (`--json`) | `AgentEvent: Serialize`, `nahida-cli/src/main.rs` | done |
 | Session persistence (JSONL log, `--continue`/`--resume`) | `nahida-cli/src/session.rs` | done |
+| Secret-free harness description (`--describe`), per ADR-0001 | `nahida-cli/src/main.rs`'s `describe` | done |
 
 ## Testing the loop
 

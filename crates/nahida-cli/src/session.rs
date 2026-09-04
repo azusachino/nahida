@@ -14,6 +14,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context as _, Result};
 use nahida_llm::Message;
 
+/// The `Line::Header` shape below. Bumping this is a breaking change to every
+/// session already on disk — `nahida --describe` reports it precisely so that
+/// is visible before it bites someone resuming an old session.
+pub const SESSION_FORMAT_VERSION: u32 = 1;
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Line {
@@ -53,7 +58,7 @@ impl SessionStore {
             .with_context(|| format!("cannot create session `{}`", path.display()))?;
 
         let header = Line::Header {
-            version: 1,
+            version: SESSION_FORMAT_VERSION,
             id: id.clone(),
             created_at: now_millis(),
             cwd: display(cwd),

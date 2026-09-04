@@ -16,7 +16,7 @@ use anyhow::{Context as _, Result};
 use clap::Parser;
 use confirm::TerminalConfirm;
 use nahida_agent::{Agent, AgentError, Cancel};
-use nahida_llm::{ContentBlock, Effort, Message};
+use nahida_llm::{ContentBlock, Effort, Message, Profile};
 use nahida_tools::Sandbox;
 use render::Renderer;
 use session::SessionStore;
@@ -95,6 +95,15 @@ struct Cli {
     /// Don't read or write a session log for this run.
     #[arg(long)]
     no_session: bool,
+
+    /// Print the effective harness configuration and exit: provider, model,
+    /// dialect, prompts, tools, approval policy, caching, compaction, and
+    /// session format. Secret-free by construction — it reports what a
+    /// credential resolved to (provider name, dialect), never the credential
+    /// itself — and reproducible without spending a token, since nothing
+    /// about it depends on an actual API call.
+    #[arg(long)]
+    describe: bool,
 }
 
 #[tokio::main]
@@ -119,8 +128,13 @@ async fn main() -> Result<()> {
     let provider = nahida_llm::resolve()?;
     let profile = provider.profile().clone();
 
-    let model = cli.model.unwrap_or_else(|| profile.default_model.clone());
+    let model = cli.model.clone().unwrap_or_else(|| profile.default_model.clone());
     let max_tokens = cli.max_tokens.unwrap_or(profile.default_max_tokens);
+
+    if cli.describe {
+        print!("{}", describe(&cli, &profile, &model, max_tokens, &sandbox));
+        return Ok(());
+    }
 
     if cli.verbose {
         eprintln!(
@@ -202,6 +216,128 @@ async fn main() -> Result<()> {
         let prompt = cli.prompt.join(" ");
         run_once(&ctx, &mut transcript, session.as_mut(), &prompt).await
     }
+}
+
+/// Report the effective harness configuration and exit, per ADR-0001: model,
+/// dialect, prompts, tools, approval policy, caching, compaction, and session
+/// format — everything reproducibility can silently depend on without this,
+/// none of it a secret. Deliberately not a general profile system: this is
+/// one function that reads state already resolved elsewhere and formats it,
+/// not a new configuration surface of its own.
+///
+/// Returns a `String` rather than printing directly so it stays a plain
+/// function `cargo test -p nahida-cli`'s unit tests can call and assert
+/// against, the same way every other module in this bin crate is tested.
+fn describe(
+    cli: &Cli,
+    profile: &Profile,
+    model: &str,
+    max_tokens: u32,
+    sandbox: &Sandbox,
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+
+    writeln!(out, "provider      {} ({:?} dialect)", profile.name, profile.dialect).unwrap();
+    writeln!(out, "model         {model}").unwrap();
+    writeln!(
+        out,
+        "effort        {}",
+        cli.effort.map_or("(provider default)".to_string(), |e| format!("{e:?}"))
+    )
+    .unwrap();
+    writeln!(out, "thinking      {}", if cli.thinking { "on" } else { "off" }).unwrap();
+    writeln!(out, "max tokens    {max_tokens}").unwrap();
+    writeln!(out, "max turns     {}", cli.max_turns).unwrap();
+    writeln!(
+        out,
+        "retries       {} (base delay {}ms, overflow recovery {})",
+        cli.max_retries,
+        cli.retry_base_delay_ms,
+        if cli.no_overflow_recovery { "off" } else { "on" }
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "workspace     {}", sandbox.root().display()).unwrap();
+    writeln!(
+        out,
+        "system prompt crates/nahida-cli/src/prompt.md ({} bytes, compiled in)",
+        include_str!("prompt.md").len()
+    )
+    .unwrap();
+
+    let tools = nahida_tools::default_set(sandbox);
+    // Every tool shipped today decides `requires_confirmation` without
+    // looking at its input (only `bash` overrides it, and unconditionally) —
+    // see `bash.rs`'s own `always_requires_confirmation_regardless_of_input`
+    // test — so probing with a placeholder input is representative. A tool
+    // that started gating conditionally would make this line approximate
+    // rather than wrong: still worth knowing, not worth blocking on here.
+    let names: Vec<String> = tools
+        .iter()
+        .map(|t| {
+            if t.requires_confirmation(&serde_json::Value::Null) {
+                format!("{}*", t.name())
+            } else {
+                t.name().to_string()
+            }
+        })
+        .collect();
+    writeln!(out, "tools         {} (* requires confirmation)", names.join(", ")).unwrap();
+    writeln!(
+        out,
+        "approval      {}",
+        if std::io::stdin().is_terminal() {
+            "interactive (tty attached — gated calls prompt)"
+        } else {
+            "ungated (no tty — gated calls run unconfirmed, same as pi's own no-popup default)"
+        }
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(
+        out,
+        "prompt cache  {}",
+        match profile.dialect {
+            nahida_llm::Dialect::Anthropic =>
+                "enabled (system+tools breakpoint, moving breakpoint on messages)",
+            nahida_llm::Dialect::Compat =>
+                "disabled (Compat dialect strips cache_control before it reaches the wire)",
+        }
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "compaction    {}",
+        cli.compact_at.map_or("off".to_string(), |t| format!("at {t} prompt tokens"))
+    )
+    .unwrap();
+
+    if cli.no_session {
+        writeln!(out, "session       disabled for this run (--no-session)").unwrap();
+    } else {
+        match session::SessionStore::sessions_dir() {
+            Ok(dir) => writeln!(
+                out,
+                "session       jsonl, format v{}, stored under {}",
+                session::SESSION_FORMAT_VERSION,
+                dir.display()
+            )
+            .unwrap(),
+            Err(e) => {
+                writeln!(
+                    out,
+                    "session       jsonl, format v{} ({e})",
+                    session::SESSION_FORMAT_VERSION
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    out
 }
 
 /// What every turn needs, independent of which turn it is. Bundled so
@@ -320,4 +456,91 @@ async fn repl(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod describe_tests {
+    use super::*;
+
+    fn cli() -> Cli {
+        Cli {
+            prompt: vec![],
+            model: None,
+            effort: None,
+            root: ".".into(),
+            max_turns: 32,
+            compact_at: None,
+            max_tokens: None,
+            max_retries: 3,
+            retry_base_delay_ms: 500,
+            no_overflow_recovery: false,
+            thinking: false,
+            verbose: false,
+            json: false,
+            continue_session: false,
+            resume: None,
+            no_session: false,
+            describe: true,
+        }
+    }
+
+    fn sandbox() -> (tempfile::TempDir, Sandbox) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sandbox = Sandbox::new(dir.path()).expect("sandbox");
+        (dir, sandbox)
+    }
+
+    fn anthropic_profile() -> Profile {
+        Profile {
+            name: "anthropic",
+            base_url: "https://api.anthropic.com".to_string(),
+            dialect: nahida_llm::Dialect::Anthropic,
+            default_model: "claude-opus-5".to_string(),
+            default_max_tokens: 64_000,
+        }
+    }
+
+    #[test]
+    fn reports_the_resolved_provider_model_and_dialect() {
+        let (_dir, sandbox) = sandbox();
+        let profile = Profile {
+            name: "zai",
+            base_url: "https://api.z.ai/api/anthropic".to_string(),
+            dialect: nahida_llm::Dialect::Compat,
+            default_model: "glm-5.1".to_string(),
+            default_max_tokens: 32_000,
+        };
+        let out = describe(&cli(), &profile, "glm-5.1", 32_000, &sandbox);
+        assert!(out.contains("provider      zai (Compat dialect)"), "{out}");
+        assert!(out.contains("model         glm-5.1"), "{out}");
+        // Compat strips cache_control before it reaches the wire (chapter 1) —
+        // describe must say so, or this line lies about what a run will do.
+        assert!(out.contains("prompt cache  disabled"), "{out}");
+    }
+
+    #[test]
+    fn marks_only_bash_as_requiring_confirmation() {
+        let (_dir, sandbox) = sandbox();
+        let out = describe(&cli(), &anthropic_profile(), "claude-opus-5", 64_000, &sandbox);
+        let tools_line = out.lines().find(|l| l.starts_with("tools")).expect("a tools line");
+        assert!(tools_line.contains("bash*"), "{tools_line}");
+        assert!(tools_line.contains("read,"), "{tools_line}");
+        assert!(!tools_line.contains("read*"), "{tools_line}");
+    }
+
+    #[test]
+    fn honors_no_session() {
+        let (_dir, sandbox) = sandbox();
+        let c = Cli { no_session: true, ..cli() };
+        let out = describe(&c, &anthropic_profile(), "claude-opus-5", 64_000, &sandbox);
+        assert!(out.contains("session       disabled for this run (--no-session)"), "{out}");
+    }
+
+    #[test]
+    fn reports_the_compaction_threshold_when_set() {
+        let (_dir, sandbox) = sandbox();
+        let c = Cli { compact_at: Some(5_000), ..cli() };
+        let out = describe(&c, &anthropic_profile(), "claude-opus-5", 64_000, &sandbox);
+        assert!(out.contains("compaction    at 5000 prompt tokens"), "{out}");
+    }
 }
