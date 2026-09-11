@@ -68,12 +68,12 @@ impl Renderer {
                 let _ = std::io::stdout().flush();
             }
 
-            AgentEvent::ToolCall { name, input } => {
+            AgentEvent::ToolCall { name, input, .. } => {
                 self.newline_if_needed();
                 println!("{CYAN}▸ {name}{RESET} {DIM}{}{RESET}", summarize(input));
             }
 
-            AgentEvent::ToolResult { name, is_error, content } => {
+            AgentEvent::ToolResult { name, is_error, content, .. } => {
                 if *is_error {
                     let first = content.lines().next().unwrap_or("").trim();
                     println!("{RED}  ✗ {name}{RESET} {DIM}{}{RESET}", truncate(first, 120));

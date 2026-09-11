@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 use nahida_llm::{
     Accumulator, ContentBlock, Delta, Effort, Message, OutputConfig, Provider, Request, Response,
     StopReason, StreamEvent, SystemBlock, Thinking, Usage,
@@ -310,21 +311,17 @@ impl Agent {
 
                     transcript.push(Message::assistant(response.replayable()));
 
-                    for (_, name, input) in &calls {
-                        sink(AgentEvent::ToolCall { name: name.clone(), input: input.clone() });
+                    for (id, name, input) in &calls {
+                        sink(AgentEvent::ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            input: input.clone(),
+                        });
                     }
 
-                    let results = self.dispatch(&calls).await;
-
-                    for (call, block) in calls.iter().zip(&results) {
-                        if let ContentBlock::ToolResult { content, is_error, .. } = block {
-                            sink(AgentEvent::ToolResult {
-                                name: call.1.clone(),
-                                is_error: *is_error,
-                                content: content.clone(),
-                            });
-                        }
-                    }
+                    // `dispatch` emits a `ToolResult` event itself, the moment
+                    // each call actually finishes — not after this returns.
+                    let results = self.dispatch(&calls, sink).await;
 
                     // One user message carrying every result, in call order.
                     transcript.push(Message::user(results));
@@ -470,14 +467,29 @@ impl Agent {
         Ok(acc.finish())
     }
 
-    /// Resolve confirmation for every call, then run the approved ones
-    /// concurrently and return the results in call order.
+    /// Three phases, per ADR-0001: resolve confirmation for every call in
+    /// source order, run the approved ones concurrently — emitting a
+    /// `ToolResult` event through `sink` the moment *each one* finishes,
+    /// not after the slowest one in the batch does — then hand back the
+    /// results reassembled into source order for the transcript.
     ///
     /// Confirmation is resolved first and sequentially — one prompt at a
     /// time — because terminal interaction can't be parallelized the way
     /// tool execution can. A denial comes back as an error result, never a
     /// dropped one, same as an unknown tool.
-    async fn dispatch(&self, calls: &[(String, String, serde_json::Value)]) -> Vec<ContentBlock> {
+    ///
+    /// `sink` runs on the same task driving the `FuturesUnordered`, between
+    /// polls — a call that blocks (a slow `println!`, a full terminal) stalls
+    /// picking up the *next* completed future, not just rendering the one
+    /// that just finished. Every `sink` this crate is built to receive is
+    /// cheap (a `println!`, a JSON write, a channel send), so this hasn't
+    /// mattered in practice; it would if a caller ever handed `dispatch` a
+    /// sink that does real work.
+    async fn dispatch(
+        &self,
+        calls: &[(String, String, serde_json::Value)],
+        sink: &mut dyn FnMut(AgentEvent),
+    ) -> Vec<ContentBlock> {
         let mut resolved = Vec::with_capacity(calls.len());
         for (_, name, input) in calls {
             let tool = self.tools.iter().find(|t| t.name() == name).cloned();
@@ -490,33 +502,58 @@ impl Agent {
             resolved.push((tool, approved));
         }
 
-        let futures = calls.iter().zip(resolved).map(|((id, name, input), (tool, approved))| {
-            let id = id.clone();
-            let name = name.clone();
-            let input = input.clone();
-            async move {
-                let outcome = if approved {
-                    match tool {
-                        Some(tool) => tool.call(input).await,
-                        // Still return a result: a call with no answer wedges
-                        // the conversation, and the model can recover from a
-                        // message.
-                        None => crate::tool::ToolOutcome::err(format!(
-                            "unknown tool `{name}` — it is not registered on this agent"
-                        )),
-                    }
-                } else {
-                    crate::tool::ToolOutcome::err(format!("`{name}` was not approved to run"))
-                };
-                ContentBlock::ToolResult {
-                    tool_use_id: id,
-                    content: outcome.content,
-                    is_error: outcome.is_error,
-                    cache_control: None,
+        // Each future is tagged with its source-order index so a completion
+        // event can fire in true finish order below, while the blocks are
+        // still placed back at their original index afterward — the
+        // persisted transcript message must not depend on which call
+        // happened to finish first.
+        let futures: FuturesUnordered<_> = calls
+            .iter()
+            .zip(resolved)
+            .enumerate()
+            .map(|(index, ((id, name, input), (tool, approved)))| {
+                let id = id.clone();
+                let name = name.clone();
+                let input = input.clone();
+                async move {
+                    let outcome = if approved {
+                        match tool {
+                            Some(tool) => tool.call(input).await,
+                            // Still return a result: a call with no answer
+                            // wedges the conversation, and the model can
+                            // recover from a message.
+                            None => crate::tool::ToolOutcome::err(format!(
+                                "unknown tool `{name}` — it is not registered on this agent"
+                            )),
+                        }
+                    } else {
+                        crate::tool::ToolOutcome::err(format!("`{name}` was not approved to run"))
+                    };
+                    let block = ContentBlock::ToolResult {
+                        tool_use_id: id,
+                        content: outcome.content,
+                        is_error: outcome.is_error,
+                        cache_control: None,
+                    };
+                    (index, name, block)
                 }
-            }
-        });
+            })
+            .collect();
 
-        futures_util::future::join_all(futures).await
+        let mut results: Vec<Option<ContentBlock>> = (0..calls.len()).map(|_| None).collect();
+        let mut remaining = futures;
+        while let Some((index, name, block)) = remaining.next().await {
+            if let ContentBlock::ToolResult { tool_use_id, content, is_error, .. } = &block {
+                sink(AgentEvent::ToolResult {
+                    tool_use_id: tool_use_id.clone(),
+                    name,
+                    is_error: *is_error,
+                    content: content.clone(),
+                });
+            }
+            results[index] = Some(block);
+        }
+
+        results.into_iter().map(|b| b.expect("every index filled exactly once")).collect()
     }
 }

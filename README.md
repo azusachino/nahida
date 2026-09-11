@@ -92,6 +92,9 @@ nahida [PROMPT...]
   -c, --continue            resume the most recent session for this --root
       --resume <ID>         resume a specific session by id (overrides -c)
       --no-session          don't read or write a session log for this run
+      --describe            print the resolved provider, model, tools, approval
+                             policy, caching, compaction, and session format,
+                             then exit -- no API call, secret-free
 ```
 
 Ctrl-C interrupts the current turn and keeps the session; twice quits.

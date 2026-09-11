@@ -22,10 +22,19 @@ pub enum AgentEvent {
         delta: String,
     },
     ToolCall {
+        /// Matches `tool_use_id` on the `ToolResult` this call is answered
+        /// by. Same name `ContentBlock::ToolUse` uses for the wire shape.
+        id: String,
         name: String,
         input: serde_json::Value,
     },
     ToolResult {
+        /// Matches the `id` on the `ToolCall` this result answers. Needed
+        /// because `dispatch` now fires this event in real completion order,
+        /// not call order — two calls to the *same* tool name are otherwise
+        /// unpairable from the event stream alone (`--json` consumers in
+        /// particular have nothing else to key on).
+        tool_use_id: String,
         name: String,
         is_error: bool,
         content: String,
