@@ -48,9 +48,9 @@ each idea depends on the last:
 7. **Context compaction**, **8. Permission gating**, **9. Evals** — the three
    features built after the walking skeleton, each with its own design
    constraints.
-10. **The CLI** (`nahida-cli`) — the only crate allowed to know a terminal
-    exists.
-11. **What's next** — the gaps this tutorial itself surfaced.
+8. **The CLI** (`nahida-cli`) — the only crate allowed to know a terminal
+   exists.
+9. **What's next** — the gaps this tutorial itself surfaced.
 
 Each chapter points at real files with real paths, not inline copies that can
 drift from the source. Open the repo alongside this and follow along — the

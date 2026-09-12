@@ -71,7 +71,7 @@ export NAHIDA_DIALECT=compat            # optional; inferred from the host
 
 ## Flags
 
-```
+```text
 nahida [PROMPT...]
   -m, --model <ID>          override the provider's default model
   -e, --effort <LEVEL>      low | medium | high | xhigh | max (Anthropic only)
