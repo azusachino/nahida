@@ -27,5 +27,10 @@ landlock.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 
+# Landlock is irreversible: each probe runs in a disposable child process.
+[[test]]
+name = "storage_boundary"
+harness = false
+
 [lints]
 workspace = true
