@@ -203,3 +203,32 @@ need additional protection; their lack of a named socket path is not that proof.
   alone is not the reason thread synchronization is absent: it never requests it.
 - [Tokio main macro](https://docs.rs/tokio/1.53.1/tokio/attr.main.html):
   default multi-thread builder precedes the body; the main future is not a worker.
+
+## Investigation verification
+
+Fresh independent peer `nahida-t02-verify` used Pi
+`zai-coding-cn/glm-5.3-flash`, low, with runtime identity confirmed and no fallback.
+It reviewed commit `d4fa18e9945dc6ad74588852bb8f6dbd2b01b3dc` against
+`3c1a6b5e0205d4aa71d189209805472da77e74a9`. C1–C5 met the bounded investigation
+criteria: replay proposal, durability proposal, hazard reproduction, honest safety
+stop and owning gates. **The original T02 safe-storage boundary remained unmet.**
+No production code changed; the new diagnostic target is executable test source.
+
+Performed independently on macOS: offline `make validate` (including check and
+release), strict locked/offline `make tutorial-build`, the focused probe target,
+`rumdl check` and Git scope/diff checks, all exit 0. The focused macOS target
+explicitly reported Linux probes not exercised. Existing 120 tests passed;
+the two paid evals remained ignored.
+
+The peer independently fetched and checked
+[Linux CI run 37777648557, job 113312439605](https://github.com/azusachino/nahida/actions/runs/37777648557/job/113312439605)
+at the exact reviewed head: Ubuntu 24.04.5, stable Rust 1.99.0, actual `make check`
+job successful and all five probe completions present. This is reused Linux CI
+evidence, not a Linux rerun on macOS. It verifies the expected unsafe/denied cases,
+not concurrent refresh, protected IPC or a credential helper.
+
+Findings retained: keep this ADR Proposed until owner acceptance; correct the
+existing process-wide README/source wording with the eventual startup-order fix.
+The delivery remains [draft PR #23](https://github.com/azusachino/nahida/pull/23).
+Owner decisions and the unproved Linux auth boundary still block dependent work;
+A3/A6/A7 are not completed by this receipt.
