@@ -37,13 +37,18 @@ pub struct SessionStore {
 
 impl SessionStore {
     /// `$XDG_DATA_HOME/nahida/sessions`, falling back to `~/.local/share`.
-    /// Dependency-free rather than pulling in a `dirs` crate for one lookup.
-    pub fn sessions_dir() -> Result<PathBuf> {
+    /// Pure lookup for description: does not create or open any path.
+    pub fn sessions_path() -> Result<PathBuf> {
         let base = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| {
             std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
         });
         let base = base.context("cannot find a data directory: set $HOME or $XDG_DATA_HOME")?;
-        let dir = base.join("nahida/sessions");
+        Ok(base.join("nahida/sessions"))
+    }
+
+    /// Resolve and create the directory before an actual session run.
+    pub fn sessions_dir() -> Result<PathBuf> {
+        let dir = Self::sessions_path()?;
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("cannot create sessions directory `{}`", dir.display()))?;
         Ok(dir)
