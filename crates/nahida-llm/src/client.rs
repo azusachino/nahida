@@ -27,6 +27,15 @@ pub enum Error {
     )]
     NoCredentials,
 
+    #[error("unknown provider `{0}`. Choose anthropic, zai, zai-coding-cn, or chatgpt")]
+    UnknownProvider(String),
+
+    #[error("provider `{0}` is not available yet; official sign-in support is not implemented")]
+    ProviderUnavailable(&'static str),
+
+    #[error("no credentials for provider `{provider}`. Set {variables}; no fallback was attempted")]
+    MissingProviderCredentials { provider: &'static str, variables: &'static str },
+
     #[error("transport: {0}")]
     Transport(#[from] reqwest::Error),
 
@@ -60,7 +69,11 @@ impl Error {
             Self::Stream { kind, .. } => {
                 matches!(kind.as_str(), "overloaded_error" | "rate_limit_error" | "api_error")
             }
-            Self::Decode { .. } | Self::NoCredentials => false,
+            Self::Decode { .. }
+            | Self::NoCredentials
+            | Self::UnknownProvider(_)
+            | Self::ProviderUnavailable(_)
+            | Self::MissingProviderCredentials { .. } => false,
         }
     }
 
