@@ -2,10 +2,14 @@
 
 ## Status
 
-Proposed. T02 design investigation under
+Replay/session contract accepted by the owner on 2026-10-08. Linux storage
+boundary remains Proposed under
 [issue #19](https://github.com/azusachino/nahida/issues/19), not an implemented
-format, approved auth helper or claim of Linux renewable-auth support.
-The replay decision and Linux storage stop point can be accepted separately.
+format, approved production auth helper or claim of Linux renewable-auth support.
+The owner selected a further guarded-process proof with fake stores, private IPC,
+concurrent atomic refresh and cleanup. The Linux prerequisite was not split or
+deferred; T04/T05 still wait for the remaining T02 proof. This acceptance record
+does not implement either contract or change production confinement.
 
 ## Date
 
