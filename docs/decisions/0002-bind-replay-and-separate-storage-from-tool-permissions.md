@@ -2,7 +2,7 @@
 
 ## Status
 
-Replay/session contract accepted by the owner on 2026-10-08. Linux storage
+Replay/session contract accepted by the owner on 2026-10-09. Linux storage
 boundary remains Proposed under
 [issue #19](https://github.com/azusachino/nahida/issues/19), not an implemented
 format, approved production auth helper or claim of Linux renewable-auth support.
@@ -47,7 +47,7 @@ merely because its Rust handle is not a model tool.
 
 ## Decision
 
-### Proposed replay and session contract
+### Replay and session contract
 
 1. Keep protocol data in `nahida-llm`, transcript mutation in `nahida-agent`,
    confinement in `nahida-tools` and disk/terminal behavior in `nahida-cli`.
