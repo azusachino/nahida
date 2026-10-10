@@ -753,6 +753,7 @@ dependencies = [
  "globset",
  "ignore",
  "landlock",
+ "libc",
  "nahida-agent",
  "regex",
  "serde_json",
