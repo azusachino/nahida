@@ -273,7 +273,7 @@ mod linux {
         drop(cancelled.stdin.take());
         let output = cancelled.wait_with_output().expect("reap cancelled helper");
         assert!(output.status.success());
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, Vec::<u8>::new(), "cancelled helper returned unexpected bytes");
     }
 
     fn guarded_ptrace_private(base: &Path) {
