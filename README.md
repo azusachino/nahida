@@ -105,6 +105,12 @@ eligibility and your live-call approval. With no selection flags, `settings.json
 may supply `defaultProvider`/`defaultModel`; without a configured default, the
 existing environment selection remains unchanged. Explicit flags win over
 settings. Model files overlay selected supported providers, not a full catalog.
+If a model omits `maxTokens`, its known provider default is retained; otherwise
+the custom-provider fallback is 32,000. `--max-tokens` overrides either.
+
+`--describe` is diagnostic, not a readiness check: it can report an unresolved
+or unsupported provider/API and exit successfully without reading auth. File
+loading, JSON syntax and selection errors still fail before that description.
 
 This slice supports API keys with `anthropic-messages` and
 `openai-completions`. The selected stored key wins over configured and ambient
