@@ -14,7 +14,7 @@ fn main() {
 #[cfg(target_os = "linux")]
 mod linux {
     use std::fs::{self, OpenOptions};
-    use std::io::{ErrorKind, Write as _};
+    use std::io::{ErrorKind, Read as _, Write as _};
     use std::os::fd::AsRawFd as _;
     use std::path::Path;
     use std::process::{Command, Stdio};
@@ -26,10 +26,17 @@ mod linux {
         "runtime_after_confinement",
         "preopened_session",
         "private_pipe_reachable",
+        "guarded_pipe_private",
+        "guarded_ptrace_private",
     ];
 
     pub fn run() {
         let args: Vec<_> = std::env::args_os().collect();
+        if args.get(1).is_some_and(|arg| arg == "--inert-helper") {
+            let parent = args[3].to_str().expect("parent pid").parse().expect("parent pid");
+            inert_helper(args.get(2).is_some_and(|arg| arg == "guarded"), parent);
+            return;
+        }
         if args.get(1).is_some_and(|arg| arg == "--probe") {
             let case = args[2].to_str().expect("probe name");
             let base = Path::new(&args[3]);
@@ -39,6 +46,8 @@ mod linux {
                 "runtime_after_confinement" => runtime_after_confinement(base),
                 "preopened_session" => preopened_session(base),
                 "private_pipe_reachable" => private_pipe_reachable(base),
+                "guarded_pipe_private" => guarded_pipe_private(base),
+                "guarded_ptrace_private" => guarded_ptrace_private(base),
                 _ => panic!("unknown probe"),
             }
             return;
@@ -179,6 +188,137 @@ mod linux {
             .expect("close-on-exec probe");
         assert!(closed.success(), "the session handle must not survive exec");
         assert_eq!(fs::read(path).expect("session contents"), b"fake-settled-entry\n");
+    }
+
+    // These guards apply only to disposable probe processes. No production
+    // helper, credential isolation or new supported topology follows from them.
+    fn guard_process() {
+        let zero: libc::c_long = 0;
+        // SAFETY: prctl scalar operations use no pointer arguments. Varargs
+        // match the API's long argument width, including on 32-bit Linux.
+        assert_eq!(unsafe { libc::prctl(libc::PR_SET_DUMPABLE, zero, zero, zero, zero) }, 0);
+        assert_eq!(unsafe { libc::prctl(libc::PR_GET_DUMPABLE, zero, zero, zero, zero) }, 0);
+    }
+
+    fn inert_helper(guarded: bool, parent: libc::pid_t) {
+        // SAFETY: only scalar arguments. Kill this test-owned helper if its
+        // probe parent is terminated by the outer watchdog, including stop states.
+        let signal: libc::c_long = libc::SIGKILL.into();
+        let zero: libc::c_long = 0;
+        assert_eq!(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal, zero, zero, zero) }, 0);
+        // A dead parent might have been replaced by a subreaper, not just PID 1.
+        assert_eq!(unsafe { libc::getppid() }, parent, "probe parent already exited");
+        if guarded {
+            guard_process();
+        }
+        std::io::stdout().write_all(b"R").expect("ready");
+        std::io::stdout().flush().expect("ready flush");
+        // A bounded inert echo, NOT a storage protocol. Empty EOF models cancel;
+        // one fixed ping models trusted traffic. Never accepts paths or commands.
+        let mut bytes = Vec::new();
+        std::io::stdin().take(5).read_to_end(&mut bytes).expect("inert input");
+        match bytes.as_slice() {
+            b"" => (),
+            b"ping" => std::io::stdout().write_all(b"pong").expect("echo"),
+            _ => panic!("invalid inert input"),
+        }
+    }
+
+    fn helper(guarded: bool) -> std::process::Child {
+        let mut child = Command::new(std::env::current_exe().expect("probe executable"))
+            .arg("--inert-helper")
+            .arg(if guarded { "guarded" } else { "dumpable" })
+            .arg(std::process::id().to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("inert helper");
+        let mut ready = [0];
+        child.stdout.as_mut().expect("stdout").read_exact(&mut ready).expect("ready");
+        assert_eq!(ready, *b"R");
+        child
+    }
+
+    fn guarded_pipe_private(base: &Path) {
+        guard_process();
+        let mut child = helper(true);
+        let control = child.stdin.as_ref().expect("control").as_raw_fd();
+        confine(base);
+        // Same-domain parent descriptor, like the unguarded positive control.
+        // Read/write procfs access must fail; CLOEXEC alone did not suffice.
+        let parent_fd = format!("/proc/{}/fd/{control}", std::process::id());
+        assert!(!shell_write(Path::new(&parent_fd)));
+        let denied_read = Command::new("bash")
+            .args(["-c", "test ! -r \"$1\" && test ! -r \"$2\"", "probe"])
+            .arg(&parent_fd)
+            .arg(format!("/proc/{}/mem", child.id()))
+            .status()
+            .expect("procfs read probe");
+        assert!(denied_read.success(), "control/memory must not be shell-readable");
+        let closed = Command::new("bash")
+            .args(["-c", "test ! -e /proc/self/fd/\"$1\"", "probe"])
+            .arg(control.to_string())
+            .status()
+            .expect("exec descriptor probe");
+        assert!(closed.success(), "control must not survive exec");
+        assert!(!shell_write(&base.join("store/outside")));
+        child.stdin.as_mut().expect("control").write_all(b"ping").expect("trusted ping");
+        drop(child.stdin.take());
+        let output = child.wait_with_output().expect("reap helper after EOF");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"pong", "only trusted bytes reached helper");
+        // Cancellation/empty EOF also terminates an owned helper. Its own guard
+        // is established after exec, which otherwise resets dumpability.
+        let mut cancelled = helper(true);
+        drop(cancelled.stdin.take());
+        let output = cancelled.wait_with_output().expect("reap cancelled helper");
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+
+    fn guarded_ptrace_private(base: &Path) {
+        confine(base);
+        // Both targets inherit the caller's Landlock domain. The caller is the
+        // target's parent: Yama's usual restricted-parent rule cannot make the
+        // negative case pass without its dumpable positive control succeeding.
+        for guarded in [false, true] {
+            let mut child = helper(guarded);
+            let pid = i32::try_from(child.id()).expect("pid");
+            // SAFETY: PTRACE_ATTACH/DETACH take no data pointers. Only the exact
+            // owned child is targeted, and the outer watchdog bounds all waits.
+            let attached = unsafe {
+                libc::ptrace(
+                    libc::PTRACE_ATTACH,
+                    pid,
+                    std::ptr::null_mut::<libc::c_void>(),
+                    std::ptr::null_mut::<libc::c_void>(),
+                )
+            };
+            let attach_error = std::io::Error::last_os_error();
+            if guarded {
+                assert_eq!(attached, -1, "non-dumpable target must refuse attach");
+                assert_eq!(attach_error.raw_os_error(), Some(libc::EPERM));
+            } else {
+                assert_eq!(attached, 0, "positive control must attach; Yama denial is not proof");
+                let mut status = 0;
+                // SAFETY: status is a valid out-pointer; pid is our stopped child.
+                assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, libc::WUNTRACED) }, pid);
+                assert!(libc::WIFSTOPPED(status));
+                assert_eq!(
+                    unsafe {
+                        libc::ptrace(
+                            libc::PTRACE_DETACH,
+                            pid,
+                            std::ptr::null_mut::<libc::c_void>(),
+                            std::ptr::null_mut::<libc::c_void>(),
+                        )
+                    },
+                    0
+                );
+            }
+            drop(child.stdin.take());
+            assert!(child.wait().expect("reap ptrace target").success());
+        }
     }
 
     fn private_pipe_reachable(base: &Path) {

@@ -149,6 +149,39 @@ A separately approved narrower Linux auth scope is an alternative; it would not
 satisfy the original two-provider A3/A7 acceptance. The current production startup
 ordering/session-write conflict remains unresolved and must be tracked until fixed.
 
+### Guarded descriptor follow-up (test-only)
+
+The owner confirmed T02-first native Rust work on 2026-10-10. The next bounded
+slice adds two isolated probes to the same mandatory Linux target; the five
+original positive controls/counterexamples remain intact:
+
+| Probe | Required observation on owning Linux CI |
+| --- | --- |
+| `guarded_pipe_private` | Non-dumpable trusted parent/helper deny shell procfs control-pipe reopening and helper-memory access; exec inherits no control descriptor; outside-root shell writes remain denied; trusted fixed ping works and EOF/empty cancellation reaps helpers |
+| `guarded_ptrace_private` | A confined parent can attach/detach its same-domain dumpable child, but receives EPERM for its same-domain non-dumpable child; Yama denial of the positive control fails the test, not a privacy pass |
+
+Only disposable tests apply `PR_SET_DUMPABLE`; helpers reapply the guard after
+exec. `PR_SET_PDEATHSIG` and a parent-identity check bound orphan risk if the
+15-second watchdog kills the probe. All bytes are inert, maximum five input
+bytes; no storage verbs, credentials, network or production startup changes.
+The existing locked libc dependency gains one Linux-only test dependency edge;
+no crate version upgrade or production syscall dependency is required.
+
+These probes are not yet Linux evidence just because macOS gates pass. The
+owning PR must record exact Linux revision/run and fresh independent review.
+Even a positive result is partial T02 only: fixed-root storage transactions,
+atomic paired replacement, cross-process refresh/logout, malformed frames and
+concrete Pi lock interoperability remain unproved. The original safe-boundary
+acceptance and T04/T05/T07 dependencies stay open. No read isolation for
+credential files is claimed; existing Landlock allows reads everywhere.
+
+Sources for this slice: [PR_SET_DUMPABLE](https://man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html),
+[PR_SET_PDEATHSIG](https://man7.org/linux/man-pages/man2/PR_SET_PDEATHSIG.2const.html)
+and [proc_pid_fd](https://man7.org/linux/man-pages/man5/proc_pid_fd.5.html).
+Native config/auth scope and additional N1–N6 acceptance are recorded in the
+[Pi compatibility plan](../plans/2026-10-10-pi-integration.md) and
+[issue #19 amendment](https://github.com/azusachino/nahida/issues/19#issuecomment-6092640643).
+
 ## Alternatives considered
 
 ### Native data as public content or an untyped JSON bag
