@@ -504,7 +504,7 @@ mod tests {
 
     fn profile() -> Profile {
         Profile {
-            name: "zai-coding-cn",
+            name: "zai-coding-cn".into(),
             base_url: "https://open.bigmodel.cn/api/coding/paas/v4".to_string(),
             dialect: Dialect::Compat,
             default_model: "glm-5.3".to_string(),

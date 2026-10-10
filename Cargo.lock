@@ -724,12 +724,22 @@ dependencies = [
  "async-trait",
  "clap",
  "nahida-agent",
+ "nahida-config",
  "nahida-llm",
  "nahida-tools",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "nahida-config"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

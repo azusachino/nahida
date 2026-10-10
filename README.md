@@ -3,8 +3,8 @@
 the agent you need
 
 A small coding agent in Rust — and a readable account of what a coding agent
-actually is. Four crates, one concept each: talk to a model, loop on tool calls,
-touch the filesystem, render to a terminal.
+actually is. One crate per concept: load configuration, talk to a model, loop
+on tool calls, touch the filesystem, render to a terminal.
 
 ## Quick start
 
@@ -81,12 +81,53 @@ export ANTHROPIC_BASE_URL=https://your-gateway.example/anthropic
 export NAHIDA_DIALECT=compat            # optional; inferred from the host
 ```
 
+### Configuration files (macOS-first)
+
+`nahida-config` reads `models.json`, `auth.json` and optional `settings.json`
+from `$XDG_CONFIG_HOME/nahida` (or `~/.config/nahida`). These record formats are
+compatible with Pi's files; Nahida owns configuration, selection and execution.
+There is no Pi runtime dependency, Pi mode or Pi-specific model flag.
+
+```bash
+# Ordinary provider/model selection; metadata only, without reading auth.json.
+cargo run -p nahida-cli -- --provider zai-coding-cn --model glm-5.3 --describe
+
+# Override the configuration home, not the application/runtime.
+cargo run -p nahida-cli -- --config-dir /path/to/config \
+  --provider local --model test-model --describe
+
+# Real binary, synthetic files/HTTP, real write tool and streamed final answer.
+cargo test -p nahida-cli --test configuration
+```
+
+Add a prompt instead of `--describe` to run the selected provider, subject to its
+eligibility and your live-call approval. With no selection flags, `settings.json`
+may supply `defaultProvider`/`defaultModel`; without a configured default, the
+existing environment selection remains unchanged. Explicit flags win over
+settings. Model files overlay selected supported providers, not a full catalog.
+
+This slice supports API keys with `anthropic-messages` and
+`openai-completions`. The selected stored key wins over configured and ambient
+keys. Literal keys, `$NAME`/`${NAME}` interpolation and `$$`/`$!` escapes work;
+`!command` is rejected without execution. Credential values are not copied into
+tool environments. `--describe` never reads `auth.json` or connects.
+
+**ChatGPT/OpenAI Responses and OAuth refresh are not wired yet.** Stored OAuth
+fails without fallback to API billing. Headers, compatibility flags, model
+overrides and credential-scoped environments are not supported yet; selected
+unsupported options fail clearly. The store is read-only in this slice.
+
+Linux renewable auth is deferred. macOS bash retains the user's privileges;
+configuration loading does not create credential-read isolation. See the
+[configuration plan](docs/plans/2026-10-10-pi-integration.md).
+
 ## Flags
 
 ```text
 nahida [PROMPT...]
-      --provider <NAME>    anthropic | zai | zai-coding-cn | chatgpt
-                             chatgpt unavailable; omit for environment precedence
+      --provider <NAME>    built-in or configured provider; chatgpt unavailable
+                             omit for settings default, then environment precedence
+      --config-dir <DIR>   override Nahida's configuration home
   -m, --model <ID>          override the provider's default model
   -e, --effort <LEVEL>      low | medium | high | xhigh | max (Anthropic only)
   -C, --root <DIR>          workspace root; tools cannot escape it  [default: .]
