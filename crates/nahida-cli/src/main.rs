@@ -1,9 +1,10 @@
 //! `nahida` — the terminal front end.
 //!
-//! Wires the three crates together and does the two things a front end owes the
-//! user: render progress as it happens, and make Ctrl-C stop the agent instead of
+//! Wires configuration, provider, agent and tool crates together. A front end
+//! owes the user progress as it happens and Ctrl-C that stops the agent instead of
 //! killing the process mid-turn.
 
+mod configuration;
 mod confirm;
 mod prompt;
 mod render;
@@ -30,10 +31,15 @@ struct Cli {
     /// The task. Omit for an interactive session.
     prompt: Vec<String>,
 
-    /// Provider to use. Omit to retain environment credential precedence.
-    /// `ChatGPT` is reserved; official sign-in is not implemented yet.
-    #[arg(long, value_parser = ["anthropic", "zai", "zai-coding-cn", "chatgpt"])]
+    /// Built-in or configured provider. Defaults to settings.json, then the
+    /// existing environment precedence. `ChatGPT` sign-in is not wired yet.
+    #[arg(long)]
     provider: Option<String>,
+
+    /// Configuration directory (models.json, auth.json, settings.json).
+    /// Defaults to `$XDG_CONFIG_HOME/nahida` or `~/.config/nahida`.
+    #[arg(long)]
+    config_dir: Option<std::path::PathBuf>,
 
     /// Model id. Defaults to the resolved provider's default.
     #[arg(short, long)]
@@ -113,6 +119,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let selection = configuration::Selection::load(&cli)?;
 
     let sandbox = Sandbox::new(&cli.root)
         .with_context(|| format!("workspace root `{}` is not usable", cli.root.display()))?;
@@ -139,9 +146,10 @@ async fn main() -> Result<()> {
     // has to stay useful with no credentials configured at all -- that's the
     // state a new user troubleshooting "why won't this start" is actually in.
     if cli.describe {
-        let resolution = nahida_llm::provider::inspect_profile(cli.provider.as_deref());
+        let resolution = selection.inspect();
         let info = resolution.as_ref().ok().map(|p| resolved_provider(&cli, p));
-        let text = describe(&cli, info.as_ref(), resolution.as_ref().err(), confined, &sandbox);
+        let error = resolution.as_ref().err().map(|e| e as &dyn std::fmt::Display);
+        let text = describe(&cli, info.as_ref(), error, confined, &sandbox);
         // In --json mode stdout is the event stream (see run_once's own
         // comment on the same rule) -- this diagnostic goes to stderr there
         // instead of corrupting it.
@@ -155,8 +163,8 @@ async fn main() -> Result<()> {
 
     // The credential error is the one a new user hits first, so let it speak for
     // itself instead of wrapping it in context.
-    let provider = nahida_llm::provider::resolve_named(cli.provider.as_deref())?;
-    let profile = provider.profile().clone();
+    let provider = selection.resolve()?;
+    let profile = selection.inspect()?;
     let ResolvedProvider { model, max_tokens, .. } = resolved_provider(&cli, &profile);
 
     if cli.verbose {
@@ -290,7 +298,7 @@ fn resolved_provider(cli: &Cli, profile: &Profile) -> ResolvedProvider {
 fn describe(
     cli: &Cli,
     resolved: Option<&ResolvedProvider>,
-    resolve_error: Option<&nahida_llm::Error>,
+    resolve_error: Option<&dyn std::fmt::Display>,
     sandbox_confined: bool,
     sandbox: &Sandbox,
 ) -> String {
@@ -561,6 +569,7 @@ mod describe_tests {
         Cli {
             prompt: vec![],
             provider: None,
+            config_dir: None,
             model: None,
             effort: None,
             root: ".".into(),
@@ -588,7 +597,7 @@ mod describe_tests {
 
     fn anthropic_profile() -> Profile {
         Profile {
-            name: "anthropic",
+            name: "anthropic".into(),
             base_url: "https://api.anthropic.com".to_string(),
             dialect: nahida_llm::Dialect::Anthropic,
             default_model: "claude-opus-5".to_string(),
@@ -608,7 +617,7 @@ mod describe_tests {
     fn reports_the_resolved_provider_model_and_dialect() {
         let (_dir, sandbox) = sandbox();
         let profile = Profile {
-            name: "zai",
+            name: "zai".into(),
             base_url: "https://api.z.ai/api/anthropic".to_string(),
             dialect: nahida_llm::Dialect::Compat,
             default_model: "glm-5.1".to_string(),

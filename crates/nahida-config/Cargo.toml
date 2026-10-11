@@ -1,0 +1,18 @@
+[package]
+name = "nahida-config"
+version = "0.1.0"
+description = "Nahida configuration files and compatible model/credential records."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

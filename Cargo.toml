@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/nahida-config",
   "crates/nahida-llm",
   "crates/nahida-agent",
   "crates/nahida-tools",
@@ -14,6 +15,7 @@ repository = "https://github.com/azusachino/nahida"
 authors = ["haru <azusachino@proton.me>"]
 
 [workspace.dependencies]
+nahida-config = { path = "crates/nahida-config" }
 nahida-llm = { path = "crates/nahida-llm" }
 nahida-agent = { path = "crates/nahida-agent" }
 nahida-tools = { path = "crates/nahida-tools" }
