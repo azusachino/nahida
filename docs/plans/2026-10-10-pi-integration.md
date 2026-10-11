@@ -1,6 +1,25 @@
 # Plan: compatible configuration, native Nahida execution
 
-Date: 2026-10-10. Status: macOS-first implementation; Linux deferred by owner.
+Date: 2026-10-10. Status: bounded API-key configuration slice delivered;
+Responses/OAuth and Linux acceptance remain open.
+
+## Owner-confirmed next milestone
+
+The owner subsequently selected whole Pi product **capability parity** in native
+Rust, not drop-in JavaScript ecosystem compatibility. The first next outcome is
+real GLM, a Pi-like core native TUI and genuine Herdr agent control with a retained
+in-memory session and parent-defined workspace permissions, without bash.
+The [native agent milestone](2026-10-10-native-agent-milestone.md) owns that scope,
+acceptance and delivery order. It supersedes the next-step ordering below, not
+issue #19's A1–A7 or the native amendments.
+
+The remaining text records the delivered configuration slice's boundaries.
+Statements excluding extension-host/product-parity work apply to that historical
+slice, not to the newly accepted long-term destination. No Pi/Node application
+runtime bridge is authorized by either plan. Local progress may use the
+owner-selected `.tmp/tasks/`; the owning issue carries the cross-device handoff
+while Asobi is unavailable. No GLM live journey, TUI or native Herdr integration
+has been delivered. Linux remains deferred.
 
 ## Outcome and corrections
 
