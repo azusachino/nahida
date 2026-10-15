@@ -118,6 +118,17 @@ pub fn resolve() -> Result<Box<dyn Provider>> {
     resolve_named(None)
 }
 
+/// Identify the provider selected by the legacy environment precedence without
+/// resolving credentials or constructing a client. The CLI uses this identity
+/// to apply that provider's normal stored-credential precedence.
+pub fn automatic_provider_name() -> Result<&'static str> {
+    let selected = select(None, &env_value)?;
+    Ok(match selected {
+        Selected::Anthropic => "anthropic",
+        Selected::Registered(entry) => entry.name,
+    })
+}
+
 /// Select a provider explicitly, or retain environment precedence with `None`.
 /// A named provider never falls back to another provider's credentials.
 /// `chatgpt` is reserved but unavailable until official sign-in is implemented.

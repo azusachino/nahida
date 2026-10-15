@@ -39,6 +39,8 @@ logging in or changing billing.
 `--provider zai-coding-cn --describe` works even without a key. Description
 inspects defaults, not a client or token store, and makes no network request.
 Endpoint overrides are deliberately not printed because URLs can contain secrets.
+A selected configured model can supply the bounded OpenAI compat and reasoning
+metadata described below; the built-in provider retains its legacy defaults.
 
 ### Anthropic
 
@@ -67,11 +69,13 @@ make run ARGS="..."                      # defaults to glm-5.3
 ```
 
 A different domain from the global plan above (`open.bigmodel.cn`, not
-`api.z.ai`) speaking a different wire format entirely — confirmed against
-`refs/pi`'s own `zai-coding-cn` provider, which uses OpenAI Chat Completions
-exclusively for this endpoint, not Anthropic Messages. `--effort`/`--thinking`
-are silent no-ops here (OpenAI Chat Completions has no equivalent), the same
-as any `Compat`-dialect Anthropic gateway.
+`api.z.ai`) speaking a different wire format entirely — confirmed against the
+pinned Pi `zai-coding-cn` provider, which uses OpenAI Chat Completions
+exclusively for this endpoint, not Anthropic Messages. When a selected model
+record declares Nahida's supported Z.ai `thinkingFormat` and reasoning metadata,
+`--effort` maps through its `thinkingLevelMap`; explicitly unsupported mapped
+levels fail before HTTP. With no `--effort`, reasoning is disabled. This does
+not make `--thinking` enable provider-side reasoning.
 
 ### Any other compatible endpoint
 
@@ -113,8 +117,14 @@ or unsupported provider/API and exit successfully without reading auth. File
 loading, JSON syntax and selection errors still fail before that description.
 
 This slice supports API keys with `anthropic-messages` and
-`openai-completions`. The selected stored key wins over configured and ambient
-keys. Literal keys, `$NAME`/`${NAME}` interpolation and `$$`/`$!` escapes work;
+`openai-completions`. Selected OpenAI model records may declare the bounded
+compat fields `supportsStore`, `supportsDeveloperRole`, `supportsReasoningEffort`,
+`maxTokensField: "max_tokens"`, `thinkingFormat: "zai"`,
+`supportsStrictMode`, `zaiToolStream`, reasoning metadata and a nullable
+`thinkingLevelMap`; unknown or unsupported selected options still fail. This is
+not general Pi model-record compatibility. The selected stored key wins over
+configured and ambient keys. Literal keys, `$NAME`/`${NAME}` interpolation and
+`$$`/`$!` escapes work;
 `!command` is rejected without execution. Credential values are not copied into
 tool environments. `--describe` never reads `auth.json` or connects.
 

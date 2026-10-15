@@ -6,7 +6,8 @@ use futures_util::StreamExt as _;
 
 use crate::client::{Auth, Client};
 use crate::{
-    Dialect, Error, EventStream, OpenAiCompletionsProvider, Profile, Provider, Request, Result,
+    Dialect, Error, EventStream, OpenAiCompletionsProvider, OpenAiOptions, Profile, Provider,
+    Request, Result,
 };
 
 /// Validate transport metadata without resolving credentials or making HTTP.
@@ -53,9 +54,37 @@ pub fn resolve(
     profile: Profile,
     key: String,
 ) -> Result<Box<dyn Provider>> {
+    resolve_inner(provider, api, profile, key, None)
+}
+
+/// Resolve a configured provider with explicit `OpenAI` Chat Completions options.
+/// Options are rejected for Anthropic rather than silently changing its request.
+pub fn resolve_with_options(
+    provider: &str,
+    api: &str,
+    profile: Profile,
+    key: String,
+    options: OpenAiOptions,
+) -> Result<Box<dyn Provider>> {
+    resolve_inner(provider, api, profile, key, Some(options))
+}
+
+fn resolve_inner(
+    provider: &str,
+    api: &str,
+    profile: Profile,
+    key: String,
+    options: Option<OpenAiOptions>,
+) -> Result<Box<dyn Provider>> {
     let provider: Box<dyn Provider> = match api {
-        "openai-completions" => Box::new(OpenAiCompletionsProvider::new(key, profile)?),
+        "openai-completions" => Box::new(match options {
+            Some(options) => OpenAiCompletionsProvider::with_options(key, profile, options)?,
+            None => OpenAiCompletionsProvider::new(key, profile)?,
+        }),
         "anthropic-messages" => {
+            if options.is_some() {
+                return Err(Error::Configuration("OpenAI options require openai-completions API"));
+            }
             let auth = if provider == "zai" {
                 Auth::Bearer { token: key, oauth: false }
             } else {

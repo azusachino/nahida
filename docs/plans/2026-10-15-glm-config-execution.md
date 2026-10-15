@@ -1,6 +1,7 @@
 # Plan: run the existing GLM configuration in native Nahida
 
-Date: 2026-10-15. Status: planned; GPT-6-Luna implementation assigned.
+Date: 2026-10-15. Status: locally delivered and independently verified;
+installed binary accepts the actual selected metadata. Live inference untested.
 
 ## Outcome and baseline
 
@@ -124,3 +125,173 @@ results, gate commands/exits, review disposition, installed binary identity,
 actual metadata-inspection result, changed/uncommitted paths and next owner
 command. Keep implementation status with issue #19 / its owning PR and this
 repository; harness artifacts are supporting caches only.
+
+## Integration follow-up (2026-10-15)
+
+Integration applied the three component patches based on `7e604e2` after all
+three initial `git apply --check` commands passed. After that clean integration,
+the wire owner supplied `wire-streaming-fix.patch`; its `git apply --check`
+passed and it was applied without overlap. It preserves incremental text,
+thinking and tool progress while validating `[DONE]`, finish reason, tool IDs
+and complete JSON arguments before successful settlement. CLI host composition
+translates config-owned metadata into OpenAI transport options. No general Pi
+compatibility is claimed; source provenance and MIT attribution are recorded
+above.
+
+Actual-binary synthetic loopback coverage includes effort maps/no effort,
+strict tool schema/request fields, reasoning and tool replay, exact UTF-8
+artifact bytes, final settlement, null-effort rejection before HTTP, malformed
+and truncated tool data, explicit provider error, and SIGINT during a partial
+tool-argument stream. The cancellation fixture confirms the signal handler ran,
+the cancelled turn emitted no `done` event, and no artifact was written; server
+close and process/accept timeouts bound cleanup. The supported effort and
+success journey also verify the actual write result and subsequent final turn.
+
+Focused checks passed after integration: config/LLM/agent unit and integration
+tests, plus the CLI configuration, credential-precedence, GLM-execution and
+provider-selection suites. Exact owning gates eventually passed:
+
+- `RUSTUP_AUTO_INSTALL=0 CARGO_NET_OFFLINE=true make validate` — passed,
+  including format, Clippy, full test suite and release build.
+- `UV_LOCKED=1 UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never make tutorial-build` — passed.
+- `rumdl check README.md docs/plans/2026-10-15-glm-config-execution.md` — passed.
+- `git diff --check` — passed.
+
+Gate iteration history is retained honestly: initial `make validate` first
+reported rustfmt in the new CLI fixture; after formatting, Clippy found simple
+assertion lints, which were corrected. A subsequent full validation caught a
+fixture-only ordering assumption for normalized required fields; the test now
+checks both required properties without depending on ordering. Those corrected
+runs passed the exact gates above. The first rumdl run found two long lines in
+the README/plan; they were wrapped and the exact command then passed. The first
+cancellation assertion incorrectly required a nonzero process exit, although
+Nahida handles SIGINT gracefully; the final fixture instead verifies the signal
+handler ran, no `done` event was emitted, no artifact was written, and bounded
+cleanup completed.
+
+Credential fixture intervention: the initial attempted automatic-CN precedence
+fixture injected a higher-priority synthetic `ANTHROPIC_API_KEY` while only
+configuring a CN loopback endpoint. It therefore could have selected the
+built-in non-loopback Anthropic endpoint with a fake value; whether any remote
+request completed is not established. No real credential was used. Parent's
+scratch incident record is `.tmp/nahida-glm-fleet/fixture-intervention.md`.
+The corrected fixture supplies only the synthetic CN key for automatic CN
+selection, retains the separate legacy-precedence test with an Anthropic
+loopback endpoint, uses bounded accept/process waits, and drains HTTP request
+bodies before replying. Final focused tests pass with the correction.
+
+No real auth/config was read, no live/non-loopback inference intentionally
+performed, and no install, commit or remote action occurred. This work is not
+actual selected-record metadata preflight, Linux proof, independent review,
+full milestone completion, or final G1-G6 acceptance. Candidate source/hash
+and executable identity are in the integration handoff; parent retains
+acceptance and publication authority.
+
+## Independent review round 1 — strict optional arguments (2026-10-15)
+
+The reviewer found a P1 in strict JSON-schema conversion: optional tool fields
+were marked required but left non-nullable. The pinned Pi strict converter
+(`refs/coding-agents/pi/packages/ai/src/api/constrained-sampling.ts:110-123`)
+first wraps optional properties as `anyOf: [original, {type: null}]`, then
+requires all fields. Integrated the wire owner's checked incremental patch,
+which adds recursive, fail-closed required-nullable conversion while preserving
+required/non-nullable semantics. The converter rejects unsupported forms rather
+than silently changing their meaning.
+
+Added actual-binary assertions that `read.offset`/`read.limit` and all six
+optional `grep` inputs are nullable in strict schemas while `read.path` and
+`grep.pattern` remain required non-nullable. A loopback journey invokes the real
+`read` tool with explicit null offset/limit and with both fields omitted; both
+must return the default complete file content, matching tool result, and final
+answer. Both journeys pass. Existing write/reasoning replay/live progress,
+malformed/truncated/provider-error, and SIGINT partial-stream/no-side-effect
+fixtures remain intact.
+
+Wire patch provenance: `wire-strict-fix.patch` passed `git apply --check`
+before application. Pinned Pi remains read-only at
+`42a3497d03ad17e308a2299fa824727894f2c0ec`; MIT attribution is in the
+transport source. After this review fix, `make validate`, tutorial-build,
+rumdl, and `git diff --check` passed. Round 2 is the plan's final review round.
+No user auth/config inspection, live inference, install, commit, or remote
+action. The first rumdl pass after adding this evidence found an overlong patch
+path line; shortened it to the patch basename and reran the exact check
+successfully.
+
+Round 1 focused evidence: `cargo test -p nahida-cli --test glm_execution`
+passed 9/9; `cargo test -p nahida-config -p nahida-llm -p nahida-agent`
+passed (7 config, 46 LLM, 20 agent integration tests and doctests);
+`cargo test -p nahida-cli --test glm_execution --test configuration
+--test credential_precedence --test provider_selection` passed (31 CLI
+tests). Final round-1 gates: offline `make validate`, locked/offline
+`make tutorial-build`, `rumdl check README.md
+docs/plans/2026-10-15-glm-config-execution.md`, and `git diff --check` all
+passed after this fix. Tutorial build emitted the existing MkDocs Material
+warning; build succeeded.
+
+Candidate source diff SHA-256 over `crates/nahida-cli/src/configuration.rs`,
+`crates/nahida-config/src/lib.rs`, `crates/nahida-llm/src/{configured.rs,
+lib.rs,openai.rs,provider.rs}`, and both CLI test sources (docs excluded):
+`c8a2dfd98708dbe2a537a0c121953fa1d3e8822ba2a8d684c4a3f14beae5a587`.
+Tested `target/debug/nahida`: version `0.1.0`, Mach-O arm64, SHA-256
+`6174b0a16e5a9a98f132d085b639422450f567347276a91af9e0b7e7c63c1ef5`.
+No install performed at that integration checkpoint; parent closeout follows.
+
+## Parent acceptance and local delivery (2026-10-15)
+
+Round-2 independent GPT-6-Luna verifier found no remaining blockers. It rechecked
+G1-G5, the strict optional/null correction against pinned Pi source, the actual
+read/write/reasoning/tool-result journeys, incremental streaming, cancellation
+and credential no-fallback fixtures. It independently reran all owning gates:
+`make validate`, locked/offline `make tutorial-build`, changed-document rumdl
+and diff checks; each exited 0. The initial P1 is resolved, not deferred.
+No third review round was needed. G1-G5 source/runtime acceptance is met for the
+bounded synthetic journeys, not all Pi configurations or provider features.
+
+The verifier's round-2 run was `30909831-3fc6-4bbf-a2f0-dac92f082fe9`.
+Parent confirmed the eight implementation/test paths are byte-identical to
+that review. Defined digest: sort repository-relative source paths, then hash
+`path + NUL + file bytes + NUL` for each path with SHA-256. Result:
+`56edd2faff65258c2acfcde4fa253f1454e9ed1e98b818e03808d862b0322f2c`.
+The earlier integration digest used a different encoding and is not treated as
+an equivalent hash. Final parent changes after review affect this evidence
+record only; runtime sources and inputs remain unchanged.
+
+Parent ran the release executable with `--config-dir ~/.pi/agent
+--provider zai-coding-cn --model glm-5.3-flash --describe`. Exit 0, with resolved
+provider `zai-coding-cn`, model `glm-5.3-flash`, output cap 131072 and no
+unsupported-option diagnostic. This metadata-only route never resolves keys or
+opens/stats auth storage; no live request was made and user files were unchanged.
+The configuration's actual selected option set is accepted, not removed.
+
+Parent then ran locked/offline `cargo install --path crates/nahida-cli
+--root "$HOME/.cargo" --force`. Exit 0, replacing the previous binary with
+`nahida 0.1.0`. Installed `~/.cargo/bin/nahida` is byte-identical (`cmp`, exit 0)
+to the verified release build; SHA-256:
+`bb79ab1195dc9a8be5113098c738d8e6018648af6107130d546bd4fd4746e8df`.
+Installed metadata inspection repeated the same successful provider/model/cap
+resolution. Cargo warned that locked `chacha20 v0.10.1` is yanked; no dependency
+or lockfile was changed. The debug binary hash above identifies test execution;
+the release hash here identifies the installed artifact.
+
+G6 local delivery is complete after these parent checks and owning final gates.
+The containing implementation commit on `feat/pi-native-macos` is the durable
+source checkpoint; the owning PR24 retains the stacked history. Component
+worktrees/patches are supporting scratch, not an alternative authoritative tree.
+The source scout and three component writers were followed by integration and
+fresh verification, all on GPT-6-Luna; parent retained installation/acceptance.
+
+Owner next command:
+
+```bash
+nahida --config-dir ~/.pi/agent \
+  --provider zai-coding-cn --model glm-5.3-flash
+```
+
+To request supported reasoning explicitly, add `--effort low` (or `high`/`max`);
+add `--thinking` to display reasoning. No effort sends disabled Z.ai thinking,
+matching the pinned provider encoder. Explicitly null-mapped levels still fail
+before HTTP. No real authentication/login/paid inference was tested; credentials,
+GLM custom-client eligibility and live-provider behavior are not established by
+successful metadata inspection. Original issue #19, full milestone, TUI/Herdr,
+OAuth/Responses and Linux storage acceptance remain open. macOS bash retains the
+user's privileges. No release, deployment or user configuration edits occurred.

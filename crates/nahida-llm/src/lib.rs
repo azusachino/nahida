@@ -45,7 +45,9 @@ pub mod stream;
 pub mod types;
 
 pub use client::{Client, Dialect, Error, Profile, Result};
-pub use openai::OpenAiCompletionsProvider;
+pub use openai::{
+    OpenAiCompletionsProvider, OpenAiMaxTokensField, OpenAiOptions, OpenAiThinkingFormat,
+};
 pub use provider::{EventStream, Provider, resolve};
 pub use stream::{Accumulator, Delta, SseDecoder, StreamEvent};
 pub use types::{

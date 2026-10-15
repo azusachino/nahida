@@ -1,6 +1,7 @@
 //! Nahida's file configuration, compatible with Pi's JSON record formats.
 //! No HTTP, agent loop, terminal, executable credential source or Pi runtime.
 
+use std::collections::BTreeMap;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
@@ -22,6 +23,45 @@ pub struct Defaults {
     pub env_key: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ThinkingLevel {
+    Off,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MaxTokensField {
+    MaxTokens,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ThinkingFormat {
+    Zai,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OpenAiCompat {
+    pub supports_store: Option<bool>,
+    pub supports_developer_role: Option<bool>,
+    pub supports_reasoning_effort: Option<bool>,
+    pub max_tokens_field: Option<MaxTokensField>,
+    pub thinking_format: Option<ThinkingFormat>,
+    pub supports_strict_mode: Option<bool>,
+    pub zai_tool_stream: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelOptions {
+    pub reasoning: bool,
+    pub thinking_level_map: Option<BTreeMap<ThinkingLevel, Option<String>>>,
+    pub compat: Option<OpenAiCompat>,
+}
+
 // Neither model records nor the file store implement Debug: both may hold keys.
 pub struct Model {
     pub provider: String,
@@ -31,6 +71,14 @@ pub struct Model {
     pub max_tokens: u32,
     key_source: Option<String>,
     env_key: Option<&'static str>,
+    options: ModelOptions,
+}
+
+impl Model {
+    /// Metadata options explicitly selected by this model record.
+    pub fn options(&self) -> &ModelOptions {
+        &self.options
+    }
 }
 
 pub struct Config {
@@ -82,21 +130,106 @@ fn string<'a>(value: &'a Value, field: &str) -> Result<Option<&'a str>> {
     }
 }
 
-fn unsupported_options(value: &Value) -> Result<()> {
-    for field in [
-        "headers",
-        "compat",
-        "authHeader",
-        "oauth",
-        "samplingParams",
-        "samplingParamsByThinkingLevel",
-        "thinkingLevelMap",
-    ] {
+fn unsupported_options(value: &Value, model: bool) -> Result<()> {
+    for field in
+        ["headers", "authHeader", "oauth", "samplingParams", "samplingParamsByThinkingLevel"]
+    {
         if value.get(field).is_some() {
             return Err(Error("selected provider/model uses options not implemented yet"));
         }
     }
+    if !model && value.get("compat").is_some() {
+        return Err(Error("provider-level compat options are not implemented yet"));
+    }
+    if !model && value.get("thinkingLevelMap").is_some() {
+        return Err(Error("provider-level thinkingLevelMap is not implemented yet"));
+    }
     Ok(())
+}
+
+fn bool_option(value: &Value, field: &str) -> Result<Option<bool>> {
+    match value.get(field) {
+        None => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        _ => Err(Error("invalid compat boolean")),
+    }
+}
+
+fn parse_compat(value: &Value) -> Result<Option<OpenAiCompat>> {
+    let Some(value) = value.get("compat") else {
+        return Ok(None);
+    };
+    let object = value.as_object().ok_or(Error("compat must be an object"))?;
+    for field in object.keys() {
+        if ![
+            "supportsStore",
+            "supportsDeveloperRole",
+            "supportsReasoningEffort",
+            "maxTokensField",
+            "thinkingFormat",
+            "supportsStrictMode",
+            "zaiToolStream",
+        ]
+        .contains(&field.as_str())
+        {
+            return Err(Error("selected model uses unsupported compat options"));
+        }
+    }
+    let max_tokens_field = match value.get("maxTokensField") {
+        None => None,
+        Some(Value::String(field)) if field == "max_tokens" => Some(MaxTokensField::MaxTokens),
+        _ => return Err(Error("unsupported maxTokensField")),
+    };
+    let thinking_format = match value.get("thinkingFormat") {
+        None => None,
+        Some(Value::String(format)) if format == "zai" => Some(ThinkingFormat::Zai),
+        _ => return Err(Error("unsupported thinkingFormat")),
+    };
+    Ok(Some(OpenAiCompat {
+        supports_store: bool_option(value, "supportsStore")?,
+        supports_developer_role: bool_option(value, "supportsDeveloperRole")?,
+        supports_reasoning_effort: bool_option(value, "supportsReasoningEffort")?,
+        max_tokens_field,
+        thinking_format,
+        supports_strict_mode: bool_option(value, "supportsStrictMode")?,
+        zai_tool_stream: bool_option(value, "zaiToolStream")?,
+    }))
+}
+
+fn parse_options(value: &Value) -> Result<ModelOptions> {
+    unsupported_options(value, true)?;
+    let reasoning = match value.get("reasoning") {
+        None => false,
+        Some(Value::Bool(reasoning)) => *reasoning,
+        _ => return Err(Error("invalid reasoning metadata")),
+    };
+    let thinking_level_map = match value.get("thinkingLevelMap") {
+        None => None,
+        Some(value) => {
+            let map = value.as_object().ok_or(Error("thinkingLevelMap must be an object"))?;
+            let mut result = BTreeMap::new();
+            for (name, value) in map {
+                let level = match name.as_str() {
+                    "off" => ThinkingLevel::Off,
+                    "minimal" => ThinkingLevel::Minimal,
+                    "low" => ThinkingLevel::Low,
+                    "medium" => ThinkingLevel::Medium,
+                    "high" => ThinkingLevel::High,
+                    "xhigh" => ThinkingLevel::XHigh,
+                    "max" => ThinkingLevel::Max,
+                    _ => return Err(Error("unsupported thinking level")),
+                };
+                let mapped = match value {
+                    Value::Null => None,
+                    Value::String(mapped) if !mapped.is_empty() => Some(mapped.clone()),
+                    _ => return Err(Error("thinkingLevelMap values must be strings or null")),
+                };
+                result.insert(level, mapped);
+            }
+            Some(result)
+        }
+    };
+    Ok(ModelOptions { reasoning, thinking_level_map, compat: parse_compat(value)? })
 }
 
 impl Config {
@@ -135,7 +268,7 @@ impl Config {
         if self.has_provider(provider) && !entry.is_object() {
             return Err(Error("provider configuration must be an object"));
         }
-        unsupported_options(entry)?;
+        unsupported_options(entry, false)?;
         if entry.get("modelOverrides").is_some() {
             return Err(Error("modelOverrides are not implemented yet"));
         }
@@ -163,7 +296,7 @@ impl Config {
         if defaults.is_none() && selected.is_null() {
             return Err(Error("model is not configured for this provider"));
         }
-        unsupported_options(selected)?;
+        let options = parse_options(selected)?;
         let api = string(selected, "api")?
             .or(string(entry, "api")?)
             .or_else(|| defaults.as_ref().map(|d| d.api))
@@ -188,6 +321,7 @@ impl Config {
             max_tokens,
             key_source: string(entry, "apiKey")?.map(str::to_owned),
             env_key: defaults.as_ref().map(|d| d.env_key),
+            options,
         })
     }
 
@@ -306,6 +440,90 @@ mod tests {
             .unwrap();
         assert_eq!(model.id, "test-model");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    fn configured_model(models_json: &str) -> Result<Model> {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("models.json"), models_json).unwrap();
+        Config::load(dir.path())?.model("zai-coding-cn", Some("glm-5.3-flash"), None)
+    }
+
+    #[test]
+    fn selected_pi_model_options_preserve_supported_metadata_and_provider_overlay() {
+        let model = configured_model(
+            r#"{"providers":{"zai-coding-cn":{"api":"openai-completions","baseUrl":"http://localhost","models":[{"id":"glm-5.3-flash","reasoning":true,"thinkingLevelMap":{"off":null,"minimal":null,"low":"low","medium":null,"high":"high","xhigh":null,"max":"max"},"compat":{"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":true,"maxTokensField":"max_tokens","thinkingFormat":"zai","supportsStrictMode":true,"zaiToolStream":true}}]}}}"#,
+        )
+        .unwrap();
+        assert!(model.options().reasoning);
+        assert_eq!(
+            model.options().thinking_level_map.as_ref().unwrap(),
+            &BTreeMap::from([
+                (ThinkingLevel::Off, None),
+                (ThinkingLevel::Minimal, None),
+                (ThinkingLevel::Low, Some("low".into())),
+                (ThinkingLevel::Medium, None),
+                (ThinkingLevel::High, Some("high".into())),
+                (ThinkingLevel::XHigh, None),
+                (ThinkingLevel::Max, Some("max".into())),
+            ])
+        );
+        assert_eq!(
+            model.options().compat.as_ref().unwrap(),
+            &OpenAiCompat {
+                supports_store: Some(false),
+                supports_developer_role: Some(false),
+                supports_reasoning_effort: Some(true),
+                max_tokens_field: Some(MaxTokensField::MaxTokens),
+                thinking_format: Some(ThinkingFormat::Zai),
+                supports_strict_mode: Some(true),
+                zai_tool_stream: Some(true),
+            }
+        );
+        assert_eq!(model.api, "openai-completions");
+        assert_eq!(model.base_url, "http://localhost");
+    }
+
+    #[test]
+    fn selected_model_options_keep_explicit_false_and_null_distinct_from_absence() {
+        let model = configured_model(
+            r#"{"providers":{"zai-coding-cn":{"api":"openai-completions","baseUrl":"http://localhost","models":[{"id":"glm-5.3-flash","compat":{"supportsStore":false},"thinkingLevelMap":{"off":null}}]}}}"#,
+        )
+        .unwrap();
+        let options = model.options();
+        assert!(!options.reasoning);
+        assert_eq!(options.compat.as_ref().unwrap().supports_store, Some(false));
+        assert_eq!(options.compat.as_ref().unwrap().supports_developer_role, None);
+        assert_eq!(
+            options.thinking_level_map.as_ref().unwrap().get(&ThinkingLevel::Off),
+            Some(&None)
+        );
+        assert!(!options.thinking_level_map.as_ref().unwrap().contains_key(&ThinkingLevel::Low));
+    }
+
+    #[test]
+    fn malformed_and_unsupported_selected_options_fail() {
+        for model_fields in [
+            r#""reasoning":"yes""#,
+            r#""thinkingLevelMap":{"low":4}"#,
+            r#""thinkingLevelMap":{"unknown":"low"}"#,
+            r#""compat":{"headers":{"x":"y"}}"#,
+            r#""compat":{"maxTokensField":"max_completion_tokens"}"#,
+            r#""compat":{"thinkingFormat":"other"}"#,
+            r#""headers":{"x":"y"}"#,
+        ] {
+            let json = format!(
+                r#"{{"providers":{{"zai-coding-cn":{{"api":"openai-completions","baseUrl":"http://localhost","models":[{{"id":"glm-5.3-flash",{model_fields}}}]}}}}}}"#
+            );
+            assert!(configured_model(&json).is_err(), "accepted {model_fields}");
+        }
+    }
+
+    #[test]
+    fn provider_level_compat_options_are_rejected_instead_of_assumed_inherited() {
+        let result = configured_model(
+            r#"{"providers":{"zai-coding-cn":{"api":"openai-completions","baseUrl":"http://localhost","compat":{"supportsStore":false},"models":[{"id":"glm-5.3-flash"}]}}}"#,
+        );
+        assert!(result.is_err());
     }
 
     #[test]
