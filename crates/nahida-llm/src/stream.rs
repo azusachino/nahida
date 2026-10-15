@@ -292,8 +292,8 @@ mod tests {
     #[test]
     fn decodes_a_frame_split_across_chunks() {
         let mut d = SseDecoder::new();
-        assert!(d.push(b"event: ping\ndata: {\"ty").is_empty());
-        assert!(d.push(b"pe\":\"ping\"}").is_empty());
+        assert_eq!(d.push(b"event: ping\ndata: {\"ty"), Vec::<String>::new());
+        assert_eq!(d.push(b"pe\":\"ping\"}"), Vec::<String>::new());
         let frames = d.push(b"\n\n");
         assert_eq!(frames, vec![r#"{"type":"ping"}"#]);
     }
@@ -322,7 +322,7 @@ mod tests {
         let split = payload.find(text).expect("marker present") + 1;
 
         let mut d = SseDecoder::new();
-        assert!(d.push(&bytes[..split]).is_empty());
+        assert_eq!(d.push(&bytes[..split]), Vec::<String>::new());
         let frames = d.push(&bytes[split..]);
         assert_eq!(frames.len(), 1);
         assert!(frames[0].contains(text), "got {}", frames[0]);
