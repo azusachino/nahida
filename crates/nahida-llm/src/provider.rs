@@ -118,6 +118,17 @@ pub fn resolve() -> Result<Box<dyn Provider>> {
     resolve_named(None)
 }
 
+/// Identify the provider selected by the legacy environment precedence without
+/// resolving credentials or constructing a client. The CLI uses this identity
+/// to apply that provider's normal stored-credential precedence.
+pub fn automatic_provider_name() -> Result<&'static str> {
+    let selected = select(None, &env_value)?;
+    Ok(match selected {
+        Selected::Anthropic => "anthropic",
+        Selected::Registered(entry) => entry.name,
+    })
+}
+
 /// Select a provider explicitly, or retain environment precedence with `None`.
 /// A named provider never falls back to another provider's credentials.
 /// `chatgpt` is reserved but unavailable until official sign-in is implemented.
@@ -141,6 +152,23 @@ pub fn resolve_named(name: Option<&str>) -> Result<Box<dyn Provider>> {
 /// contain secrets: callers must not print `Profile::base_url` verbatim.
 pub fn inspect_profile(name: Option<&str>) -> Result<Profile> {
     Ok(select(name, &env_value)?.profile(&env_value))
+}
+
+/// Metadata and key-variable defaults for configuration consumers. Does not
+/// resolve credentials. Retains existing endpoint/dialect environment overrides.
+pub fn configuration_defaults(name: &str) -> Option<(Profile, &'static str, &'static str)> {
+    let selected = select(Some(name), &|_| None).ok()?;
+    let (api, key) = match selected {
+        Selected::Anthropic => ("anthropic-messages", "ANTHROPIC_API_KEY"),
+        Selected::Registered(entry) => (
+            match entry.wire {
+                Wire::AnthropicMessages(_) => "anthropic-messages",
+                Wire::OpenAiCompletions => "openai-completions",
+            },
+            entry.env_key,
+        ),
+    };
+    Some((selected.profile(&env_value), api, key))
 }
 
 fn env_value(key: &str) -> Option<String> {
@@ -181,7 +209,7 @@ impl Selected {
             return profile;
         };
         let mut profile = Profile {
-            name: entry.name,
+            name: entry.name.to_owned(),
             base_url: entry.base_url.to_string(),
             // Non-Anthropic profiles retain the informational Compat placeholder.
             dialect: match entry.wire {
@@ -228,7 +256,7 @@ fn apply_overrides(env: &impl Fn(&str) -> Option<String>, profile: &mut Profile)
     if let Some(url) = env("ANTHROPIC_BASE_URL") {
         profile.dialect = Dialect::infer(&url);
         profile.base_url = url;
-        profile.name = "custom";
+        profile.name = "custom".into();
     }
     if let Some(d) = env("NAHIDA_DIALECT").as_deref().and_then(Dialect::parse) {
         profile.dialect = d;

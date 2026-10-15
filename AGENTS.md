@@ -15,6 +15,11 @@ exactly one home, and each new one lands on something that already runs.
 
 **One crate, one concept. A crate may not know what the crate above it does.**
 
+`nahida-config` knows configuration files and compatible model/credential record
+formats, not HTTP, an agent or a terminal. `nahida-cli` composes its resolved
+settings with provider transports; the provider layer does not read those files.
+Configuration compatibility is not a Pi mode or runtime integration.
+
 `nahida-llm` knows how to talk to a model provider — Anthropic Messages, OpenAI
 Chat Completions, whichever wire format a given provider actually speaks,
 behind one `Provider` trait — and does not know what an agent is.
@@ -31,6 +36,7 @@ usually in the wrong crate.
 
 | Path | What it is |
 | --- | --- |
+| `crates/nahida-config/` | Configuration file loading, compatible model/settings/credential records; no transport or agent dependency |
 | `crates/nahida-llm/` | Provider abstraction (`Provider` trait, a small registry), two wire formats (Anthropic Messages, OpenAI Chat Completions), auth, dialects, SSE streaming |
 | `crates/nahida-agent/` | The loop: turns, tool dispatch, cancellation, events |
 | `crates/nahida-tools/` | `read`, `write`, `edit`, `bash`, `find`, `grep`, `ls`, and path confinement |
@@ -69,6 +75,7 @@ Where each idea lives, and which are still to come. Tracked as
 
 | Concept | Where | Status |
 | --- | --- | --- |
+| Compatible configuration files and ordinary provider/model selection | `nahida-config`, CLI composition | API-key slice; OAuth refresh pending |
 | Provider abstraction, streaming, dialects | `nahida-llm` | done |
 | A second wire format (OpenAI Chat Completions), for the Z.ai China coding plan | `nahida-llm/src/openai.rs`, `provider.rs`'s registry | done |
 | The agent loop, `stop_reason`, cancellation | `nahida-agent/agent.rs` | done |
@@ -167,6 +174,6 @@ make tutorial   # serve docs/ locally -- the 0-to-hero walkthrough
 
 ## Git
 
-Commit messages are scoped by crate: `{feat,fix,chore,docs}(llm|agent|tools|cli): message`,
-or unscoped for changes spanning the whole workspace (`AGENTS.md`, `Cargo.toml`,
-`Makefile`).
+Commit messages use a crate scope (`config`, `llm`, `agent`, `tools`, `cli`):
+`{feat,fix,chore,docs}(<scope>): message`. Omit the scope for workspace changes
+(`AGENTS.md`, `Cargo.toml`, `Makefile`).

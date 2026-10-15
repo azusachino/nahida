@@ -36,6 +36,9 @@ pub enum Error {
     #[error("no credentials for provider `{provider}`. Set {variables}; no fallback was attempted")]
     MissingProviderCredentials { provider: &'static str, variables: &'static str },
 
+    #[error("configuration: {0}")]
+    Configuration(&'static str),
+
     #[error("transport: {0}")]
     Transport(#[from] reqwest::Error),
 
@@ -70,6 +73,7 @@ impl Error {
                 matches!(kind.as_str(), "overloaded_error" | "rate_limit_error" | "api_error")
             }
             Self::Decode { .. }
+            | Self::Configuration(_)
             | Self::NoCredentials
             | Self::UnknownProvider(_)
             | Self::ProviderUnavailable(_)
@@ -154,7 +158,7 @@ impl Dialect {
 /// Endpoint defaults, so the CLI does not have to know which provider is in play.
 #[derive(Debug, Clone)]
 pub struct Profile {
-    pub name: &'static str,
+    pub name: String,
     pub base_url: String,
     /// Only meaningful for a provider speaking the Anthropic Messages wire
     /// format — a provider on a different wire format (see
@@ -352,7 +356,7 @@ impl crate::provider::Provider for Client {
 
 pub(crate) fn anthropic_profile() -> Profile {
     Profile {
-        name: "anthropic",
+        name: "anthropic".into(),
         base_url: ANTHROPIC_BASE_URL.to_string(),
         dialect: Dialect::Anthropic,
         default_model: DEFAULT_MODEL.to_string(),

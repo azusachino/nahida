@@ -224,7 +224,7 @@ impl FakeProvider {
         }
 
         let profile = Profile {
-            name: "fake",
+            name: "fake".into(),
             base_url: format!("http://127.0.0.1:{port}"),
             dialect,
             default_model: "fake-1".to_string(),

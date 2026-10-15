@@ -12,6 +12,7 @@ name = "nahida"
 path = "src/main.rs"
 
 [dependencies]
+nahida-config.workspace = true
 nahida-agent.workspace = true
 nahida-llm.workspace = true
 nahida-tools.workspace = true
