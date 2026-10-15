@@ -115,38 +115,75 @@ const REGISTRY: &[ProviderEntry] = &[
 /// different wire format has no `Dialect` for the override to adjust, and the
 /// override is skipped for it entirely.
 pub fn resolve() -> Result<Box<dyn Provider>> {
-    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    resolve_named(None)
+}
 
-    // First-party Anthropic is special-cased: it's reachable via two
-    // different env vars, and only the OAuth-token path ever sends the
-    // `oauth-2025-04-20` beta header. Nothing in the declarative registry
-    // below needs that nuance.
-    let anthropic = if let Some(key) = env("ANTHROPIC_API_KEY") {
-        Some(Auth::ApiKey(key))
-    } else {
-        env("ANTHROPIC_AUTH_TOKEN").map(|token| {
-            let oauth = env("ANTHROPIC_BASE_URL").is_none();
-            Auth::Bearer { token, oauth }
-        })
-    };
-
-    if let Some(auth) = anthropic {
-        let mut profile = client::anthropic_profile();
-        apply_overrides(&env, &mut profile);
-        return Ok(Box::new(Client::new(auth, profile)?));
+/// Select a provider explicitly, or retain environment precedence with `None`.
+/// A named provider never falls back to another provider's credentials.
+/// `chatgpt` is reserved but unavailable until official sign-in is implemented.
+pub fn resolve_named(name: Option<&str>) -> Result<Box<dyn Provider>> {
+    let selected = select(name, &env_value)?;
+    let profile = selected.profile(&env_value);
+    let auth = selected.auth(&env_value)?;
+    match selected {
+        Selected::Registered(ProviderEntry { wire: Wire::OpenAiCompletions, .. }) => {
+            let Auth::Bearer { token, .. } = auth else { unreachable!() };
+            Ok(Box::new(OpenAiCompletionsProvider::new(token, profile)?))
+        }
+        _ => Ok(Box::new(Client::new(auth, profile)?)),
     }
+}
 
-    for entry in REGISTRY {
-        let Some(key) = env(entry.env_key) else { continue };
+/// Inspect effective defaults without constructing a client or resolving auth.
+/// Explicit selection works without credentials. Auto selection checks which
+/// credential variables are nonempty, preserving [`resolve`]'s precedence.
+/// No token store, refresh, or network is involved. Endpoint overrides can
+/// contain secrets: callers must not print `Profile::base_url` verbatim.
+pub fn inspect_profile(name: Option<&str>) -> Result<Profile> {
+    Ok(select(name, &env_value)?.profile(&env_value))
+}
+
+fn env_value(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|value| !value.is_empty())
+}
+
+#[derive(Clone, Copy)]
+enum Selected {
+    Anthropic,
+    Registered(&'static ProviderEntry),
+}
+
+fn select(name: Option<&str>, env: &impl Fn(&str) -> Option<String>) -> Result<Selected> {
+    match name {
+        Some("anthropic") => Ok(Selected::Anthropic),
+        Some("chatgpt") => Err(Error::ProviderUnavailable("chatgpt")),
+        Some(name) => REGISTRY
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(Selected::Registered)
+            .ok_or_else(|| Error::UnknownProvider(name.to_string())),
+        None if env("ANTHROPIC_API_KEY").is_some() || env("ANTHROPIC_AUTH_TOKEN").is_some() => {
+            Ok(Selected::Anthropic)
+        }
+        None => REGISTRY
+            .iter()
+            .find(|entry| env(entry.env_key).is_some())
+            .map(Selected::Registered)
+            .ok_or(Error::NoCredentials),
+    }
+}
+
+impl Selected {
+    fn profile(self, env: &impl Fn(&str) -> Option<String>) -> Profile {
+        let Self::Registered(entry) = self else {
+            let mut profile = client::anthropic_profile();
+            apply_overrides(env, &mut profile);
+            return profile;
+        };
         let mut profile = Profile {
             name: entry.name,
             base_url: entry.base_url.to_string(),
-            // A wire format with no `Dialect` of its own gets `Compat` as a
-            // placeholder — informational only (the `--verbose` print, and
-            // `Client`-specific field-stripping neither this profile nor its
-            // provider ever runs) rather than a new `Option<Dialect>` shape
-            // change rippling through every caller for one field nobody
-            // outside `Client` reads on this path.
+            // Non-Anthropic profiles retain the informational Compat placeholder.
             dialect: match entry.wire {
                 Wire::AnthropicMessages(dialect) => dialect,
                 Wire::OpenAiCompletions => Dialect::Compat,
@@ -154,17 +191,33 @@ pub fn resolve() -> Result<Box<dyn Provider>> {
             default_model: entry.default_model.to_string(),
             default_max_tokens: entry.default_max_tokens,
         };
-
-        return match entry.wire {
-            Wire::AnthropicMessages(_) => {
-                apply_overrides(&env, &mut profile);
-                Ok(Box::new(Client::new(Auth::Bearer { token: key, oauth: false }, profile)?))
-            }
-            Wire::OpenAiCompletions => Ok(Box::new(OpenAiCompletionsProvider::new(key, profile)?)),
-        };
+        if matches!(entry.wire, Wire::AnthropicMessages(_)) {
+            apply_overrides(env, &mut profile);
+        }
+        profile
     }
 
-    Err(Error::NoCredentials)
+    fn auth(self, env: &impl Fn(&str) -> Option<String>) -> Result<Auth> {
+        match self {
+            Self::Anthropic => {
+                if let Some(key) = env("ANTHROPIC_API_KEY") {
+                    return Ok(Auth::ApiKey(key));
+                }
+                env("ANTHROPIC_AUTH_TOKEN")
+                    .map(|token| Auth::Bearer { token, oauth: env("ANTHROPIC_BASE_URL").is_none() })
+                    .ok_or(Error::MissingProviderCredentials {
+                        provider: "anthropic",
+                        variables: "ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN",
+                    })
+            }
+            Self::Registered(entry) => env(entry.env_key)
+                .map(|token| Auth::Bearer { token, oauth: false })
+                .ok_or(Error::MissingProviderCredentials {
+                    provider: entry.name,
+                    variables: entry.env_key,
+                }),
+        }
+    }
 }
 
 /// `ANTHROPIC_BASE_URL`/`NAHIDA_DIALECT`, applied after whichever
@@ -179,5 +232,110 @@ fn apply_overrides(env: &impl Fn(&str) -> Option<String>, profile: &mut Profile)
     }
     if let Some(d) = env("NAHIDA_DIALECT").as_deref().and_then(Dialect::parse) {
         profile.dialect = d;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env(values: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        |key| values.iter().find(|(name, _)| *name == key).map(|(_, value)| (*value).to_string())
+    }
+
+    #[test]
+    fn named_cn_ignores_other_credentials_and_anthropic_overrides() {
+        let env = env(&[
+            ("ANTHROPIC_API_KEY", "fake-anthropic"),
+            ("ZAI_API_KEY", "fake-global"),
+            ("ANTHROPIC_BASE_URL", "https://secret.example/token"),
+            ("NAHIDA_DIALECT", "anthropic"),
+        ]);
+        let selected = select(Some("zai-coding-cn"), &env).unwrap();
+        let profile = selected.profile(&env);
+        assert_eq!(profile.name, "zai-coding-cn");
+        assert_eq!(profile.default_model, "glm-5.3");
+        assert_eq!(profile.base_url, "https://open.bigmodel.cn/api/coding/paas/v4");
+        assert_eq!(profile.dialect, Dialect::Compat);
+        let error = selected.auth(&env).unwrap_err();
+        assert!(matches!(
+            error,
+            Error::MissingProviderCredentials { provider: "zai-coding-cn", .. }
+        ));
+        assert!(!error.is_retryable());
+    }
+
+    #[test]
+    fn auto_selection_preserves_each_precedence_level() {
+        let keys =
+            ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ZAI_API_KEY", "ZAI_CODING_CN_API_KEY"];
+        let names = ["anthropic", "anthropic", "zai", "zai-coding-cn"];
+        for (index, expected) in names.iter().enumerate() {
+            let values: Vec<_> = keys[index..].iter().map(|key| (*key, "fake-key")).collect();
+            let env = env(&values);
+            assert_eq!(select(None, &env).unwrap().profile(&env).name, *expected);
+        }
+        assert!(matches!(select(None, &env(&[])), Err(Error::NoCredentials)));
+    }
+
+    #[test]
+    fn explicit_metadata_does_not_read_credentials() {
+        let metadata_env = |key: &str| {
+            assert!(matches!(key, "ANTHROPIC_BASE_URL" | "NAHIDA_DIALECT"), "read {key}");
+            None
+        };
+        for name in ["anthropic", "zai", "zai-coding-cn"] {
+            let profile = select(Some(name), &metadata_env).unwrap().profile(&metadata_env);
+            assert_eq!(profile.name, name);
+        }
+    }
+
+    #[test]
+    fn anthropic_auth_keeps_api_key_precedence_and_oauth_header_policy() {
+        let both =
+            env(&[("ANTHROPIC_API_KEY", "fake-key"), ("ANTHROPIC_AUTH_TOKEN", "fake-token")]);
+        assert!(matches!(Selected::Anthropic.auth(&both).unwrap(), Auth::ApiKey(_)));
+        let token = env(&[("ANTHROPIC_AUTH_TOKEN", "fake-token")]);
+        assert!(matches!(
+            Selected::Anthropic.auth(&token).unwrap(),
+            Auth::Bearer { oauth: true, .. }
+        ));
+        let gateway = env(&[
+            ("ANTHROPIC_AUTH_TOKEN", "fake-token"),
+            ("ANTHROPIC_BASE_URL", "http://localhost:8080"),
+        ]);
+        assert!(matches!(
+            Selected::Anthropic.auth(&gateway).unwrap(),
+            Auth::Bearer { oauth: false, .. }
+        ));
+    }
+
+    #[test]
+    fn global_glm_keeps_anthropic_endpoint_and_dialect_overrides() {
+        let env = env(&[
+            ("ANTHROPIC_BASE_URL", "http://localhost:8080"),
+            ("NAHIDA_DIALECT", "anthropic"),
+        ]);
+        let profile = select(Some("zai"), &env).unwrap().profile(&env);
+        assert_eq!(profile.name, "custom");
+        assert_eq!(profile.base_url, "http://localhost:8080");
+        assert_eq!(profile.dialect, Dialect::Anthropic);
+        assert_eq!(profile.default_model, "glm-5.1");
+    }
+
+    #[test]
+    fn unavailable_and_unknown_providers_do_not_attempt_fallback() {
+        let no_env_reads = |key: &str| panic!("unexpected env read: {key}");
+        assert!(matches!(
+            select(Some("chatgpt"), &no_env_reads),
+            Err(Error::ProviderUnavailable("chatgpt"))
+        ));
+        assert!(matches!(select(Some("missing"), &no_env_reads), Err(Error::UnknownProvider(_))));
+        for error in
+            [Error::ProviderUnavailable("chatgpt"), Error::UnknownProvider("missing".into())]
+        {
+            assert!(!error.is_retryable());
+            assert!(!error.is_context_overflow());
+        }
     }
 }

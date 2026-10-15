@@ -30,6 +30,11 @@ struct Cli {
     /// The task. Omit for an interactive session.
     prompt: Vec<String>,
 
+    /// Provider to use. Omit to retain environment credential precedence.
+    /// `ChatGPT` is reserved; official sign-in is not implemented yet.
+    #[arg(long, value_parser = ["anthropic", "zai", "zai-coding-cn", "chatgpt"])]
+    provider: Option<String>,
+
     /// Model id. Defaults to the resolved provider's default.
     #[arg(short, long)]
     model: Option<String>,
@@ -134,8 +139,8 @@ async fn main() -> Result<()> {
     // has to stay useful with no credentials configured at all -- that's the
     // state a new user troubleshooting "why won't this start" is actually in.
     if cli.describe {
-        let resolution = nahida_llm::resolve();
-        let info = resolution.as_ref().ok().map(|p| resolved_provider(&cli, p.profile()));
+        let resolution = nahida_llm::provider::inspect_profile(cli.provider.as_deref());
+        let info = resolution.as_ref().ok().map(|p| resolved_provider(&cli, p));
         let text = describe(&cli, info.as_ref(), resolution.as_ref().err(), confined, &sandbox);
         // In --json mode stdout is the event stream (see run_once's own
         // comment on the same rule) -- this diagnostic goes to stderr there
@@ -150,7 +155,7 @@ async fn main() -> Result<()> {
 
     // The credential error is the one a new user hits first, so let it speak for
     // itself instead of wrapping it in context.
-    let provider = nahida_llm::resolve()?;
+    let provider = nahida_llm::provider::resolve_named(cli.provider.as_deref())?;
     let profile = provider.profile().clone();
     let ResolvedProvider { model, max_tokens, .. } = resolved_provider(&cli, &profile);
 
@@ -408,7 +413,7 @@ fn describe(
     if cli.no_session {
         writeln!(out, "session       disabled for this run (--no-session)").unwrap();
     } else {
-        match session::SessionStore::sessions_dir() {
+        match session::SessionStore::sessions_path() {
             Ok(dir) => writeln!(
                 out,
                 "session       jsonl, format v{}, stored under {}",
@@ -555,6 +560,7 @@ mod describe_tests {
     fn cli() -> Cli {
         Cli {
             prompt: vec![],
+            provider: None,
             model: None,
             effort: None,
             root: ".".into(),

@@ -28,14 +28,26 @@ a compatible endpoint, Anthropic-only fields (`output_config.effort`,
 adaptive `thinking`, `cache_control`) are stripped before the request goes
 out rather than gambling on whether the gateway ignores or rejects them.
 
-**Anthropic**
+Choose a provider explicitly with `--provider anthropic`, `--provider zai`, or
+`--provider zai-coding-cn`. Without the flag, the first nonempty credential wins:
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ZAI_API_KEY`, then
+`ZAI_CODING_CN_API_KEY`. A named provider never falls back to another key.
+`--provider chatgpt` is reserved but unavailable: official sign-in and Responses
+support are not implemented yet. `--describe` reports that limitation without
+logging in or changing billing.
+
+`--provider zai-coding-cn --describe` works even without a key. Description
+inspects defaults, not a client or token store, and makes no network request.
+Endpoint overrides are deliberately not printed because URLs can contain secrets.
+
+### Anthropic
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 make run ARGS="..."                      # defaults to claude-opus-5
 ```
 
-**Z.ai coding plan (GLM), global**
+### Z.ai coding plan (GLM), global
 
 ```bash
 export ZAI_API_KEY=...
@@ -47,7 +59,7 @@ agent tests, so it is known to work behind an Anthropic-shaped tool loop.
 `glm-5.2` is newer with a 1M context window; `glm-5` caps output near 20k tokens,
 so pass `--max-tokens` if you use it.
 
-**Z.ai coding plan (GLM), China region**
+### Z.ai coding plan (GLM), China region
 
 ```bash
 export ZAI_CODING_CN_API_KEY=...
@@ -61,7 +73,7 @@ exclusively for this endpoint, not Anthropic Messages. `--effort`/`--thinking`
 are silent no-ops here (OpenAI Chat Completions has no equivalent), the same
 as any `Compat`-dialect Anthropic gateway.
 
-**Any other compatible endpoint**
+### Any other compatible endpoint
 
 ```bash
 export ANTHROPIC_AUTH_TOKEN=...
@@ -73,6 +85,8 @@ export NAHIDA_DIALECT=compat            # optional; inferred from the host
 
 ```text
 nahida [PROMPT...]
+      --provider <NAME>    anthropic | zai | zai-coding-cn | chatgpt
+                             chatgpt unavailable; omit for environment precedence
   -m, --model <ID>          override the provider's default model
   -e, --effort <LEVEL>      low | medium | high | xhigh | max (Anthropic only)
   -C, --root <DIR>          workspace root; tools cannot escape it  [default: .]
@@ -82,7 +96,8 @@ nahida [PROMPT...]
                              reaches N tokens                        [default: off]
       --max-retries <N>     retries for a rate limit/server/transport
                              error, with backoff                     [default: 3]
-      --retry-base-delay-ms <N>  base backoff delay; doubles per retry [default: 500]
+      --retry-base-delay-ms <N>  base backoff delay; doubles per retry
+                                  [default: 500]
       --no-overflow-recovery    disable the one-shot compact-and-retry
                              on a real context-overflow error
       --thinking            stream summarized reasoning
