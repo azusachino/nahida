@@ -27,5 +27,14 @@ landlock.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 
+# Test-only prctl/ptrace probes; no production process policy is changed.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"
+
+# Landlock is irreversible: each probe runs in a disposable child process.
+[[test]]
+name = "storage_boundary"
+harness = false
+
 [lints]
 workspace = true
