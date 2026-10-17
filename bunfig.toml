@@ -1,5 +1,5 @@
 [install]
-# Supply-chain cooldown: only package versions published at least 7 days ago.
-# Bun measures minimumReleaseAge in seconds (7 days = 604800). bun 1.4.2 did not
+# Supply-chain cooldown: only package versions published at least 3 days ago.
+# Bun measures minimumReleaseAge in seconds (3 days = 259200). bun 1.4.2 did not
 # apply the owner's ~/.bunfig.toml in testing, so the policy is pinned here too.
-minimumReleaseAge = 604800
+minimumReleaseAge = 259200

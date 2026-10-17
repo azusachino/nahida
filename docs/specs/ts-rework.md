@@ -21,7 +21,7 @@ profile composes.
   defaulting to the current directory, and every model-supplied path is
   resolved inside it.
 - pi package versions are pinned exactly to the newest release that passes
-  the owner's 7-day install cooldown (1.1.0 as of 2026-10-17). The project
+  the owner's 3-day install cooldown (1.1.0 as of 2026-10-17). The project
   `bunfig.toml` enforces that cooldown. APIs are verified against the installed
   package's own docs, not `refs/coding-agents/pi` (stale at 0.87.1).
 
