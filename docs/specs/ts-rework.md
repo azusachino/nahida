@@ -54,6 +54,17 @@ an automated test against a fake or faux provider with no network.
    names, prompt fragment sources, approval policy, session dir. It contains
    no API key, even when one is set in the environment. Evidence: test that
    sets a sentinel key and greps the output for it.
+7a. Providers, models and credentials come from pi's existing configuration,
+    not nahida-specific env vars. The agent dir is `PI_CODING_AGENT_DIR`,
+    falling back to `~/.pi/agent`. nahida reads `auth.json` (including OAuth
+    credentials such as `openai-codex`) and `models.json` (custom providers
+    such as `zai-coding-cn`) through pi's own registry code, so file
+    locking and OAuth refresh behave exactly as they do for pi and luna. A
+    profile's `model = "<provider>/<id>"` wins over the defaults; otherwise
+    `settings.json`'s `defaultProvider`/`defaultModel` apply. Evidence: a test
+    with a fixture agent dir (API-key provider plus custom models.json)
+    showing the resolved model and that `--describe` names the provider but
+    not the key.
 8. Every pack's disposer runs on normal exit and on SIGINT. Evidence: test with
    a pack that records disposal.
 
@@ -96,7 +107,8 @@ Each slice ends green on `make check` and is one PR.
 1. Tag `rust-final`. Remove the Rust tree and flake, add `.mise.toml`,
    scaffold the Bun/TS project, wire the pi-ai and pi-agent-core CLI, and add
    `--json`. Covers criteria 1–4.
-2. Pack and profile loader, `--describe`, disposal. Covers 5–8.
+2. Pack and profile loader, pi config reuse, `--describe`, disposal. Covers
+   5–8, including 7a.
 3. Sessions on the pi-agent-core store, plus `--continue`. Covers 9–10.
 4. writing pack. Covers 11.
 5. reading pack. Covers 12.
