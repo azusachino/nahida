@@ -20,9 +20,10 @@ profile composes.
 - Pack work files live in one confined workspace directory per session,
   defaulting to the current directory, and every model-supplied path is
   resolved inside it.
-- pi package versions are pinned exactly to the newest release that passes
-  the owner's 3-day install cooldown (1.1.0 as of 2026-10-17). The project
-  `bunfig.toml` enforces that cooldown. APIs are verified against the installed
+- pi package versions are pinned exactly. pi follows upstream releases that
+  pass the owner's 3-day install cooldown (currently 1.2.0, as of 2026-10-17);
+  this is not a deliberate hold on an older version. The project `bunfig.toml`
+  enforces that cooldown. APIs are verified against the installed
   package's own docs, not `refs/coding-agents/pi` (stale at 0.87.1).
 
 ## Acceptance criteria
