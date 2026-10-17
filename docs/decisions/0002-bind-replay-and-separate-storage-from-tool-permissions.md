@@ -2,6 +2,8 @@
 
 ## Status
 
+Superseded by [ADR-0003](0003-rebuild-nahida-as-a-pi-backed-deep-work-harness.md).
+
 Replay/session contract accepted by the owner on 2026-10-09. Linux storage
 boundary remains Proposed under
 [issue #19](https://github.com/azusachino/nahida/issues/19), not an implemented
