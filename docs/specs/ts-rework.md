@@ -10,8 +10,11 @@ profile composes.
 
 ## Assumptions (proposals, not owner decisions)
 
-- Runtime is **Bun** with TypeScript, matching luna. Tools are pinned in
-  `.mise.toml`, and `make` stays the task runner.
+- Runtime is **Bun** with TypeScript, matching luna. All tools (bun, uv,
+  python, linters) are pinned in a root `.mise.toml`, and `make` stays the task
+  runner. There is no Nix devShell: `flake.nix` and `flake.lock` go away with
+  the Rust tree. The old `docs/mise.toml` is folded into the root file or
+  removed with the tutorial.
 - Profiles live in `~/.config/nahida/profiles/<name>.toml`. A built-in
   `default` profile loads all three packs.
 - Pack work files live in one confined workspace directory per session,
@@ -28,10 +31,11 @@ an automated test against a fake or faux provider with no network.
 
 **Core and migration**
 
-1. The commit tagged `rust-final` builds with `make validate` from a clean
-   checkout. Evidence: the gate run on the tag.
-2. `main` contains no `Cargo.toml`, `crates/`, or Rust tutorial pages.
-   `make check` runs TypeScript typecheck, lint and tests. Evidence: tree
+1. The commit tagged `rust-final` builds with `nix develop -c make validate`
+   from a clean checkout, using the flake it still contains. Evidence: the gate run on the tag.
+2. `main` contains no `Cargo.toml`, `crates/`, `flake.nix`, `flake.lock`, or
+   Rust tutorial pages. From a clean clone, `mise install && make check` is the
+   whole setup, and `make check` runs TypeScript typecheck, lint and tests. Evidence: tree
    listing and gate output.
 3. `nahida "<prompt>"` streams an answer from the configured provider. Without
    credentials it exits non-zero with a message that names the missing
@@ -89,8 +93,9 @@ installer, sharing packs with luna, and writing into apricot.
 
 Each slice ends green on `make check` and is one PR.
 
-1. Tag `rust-final`. Scaffold the Bun/TS project, wire the pi-ai and
-   pi-agent-core CLI, and add `--json`. Covers criteria 1–4.
+1. Tag `rust-final`. Remove the Rust tree and flake, add `.mise.toml`,
+   scaffold the Bun/TS project, wire the pi-ai and pi-agent-core CLI, and add
+   `--json`. Covers criteria 1–4.
 2. Pack and profile loader, `--describe`, disposal. Covers 5–8.
 3. Sessions on the pi-agent-core store, plus `--continue`. Covers 9–10.
 4. writing pack. Covers 11.

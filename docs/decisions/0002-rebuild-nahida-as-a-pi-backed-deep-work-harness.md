@@ -89,6 +89,8 @@ packs' tools.
 
 - The crate-boundary contract and the Rust rules in `AGENTS.md` are replaced.
   `AGENTS.md` is rewritten in the same change that removes the Rust tree.
+- Tooling moves from the Nix devShell to mise, following the workstation
+  default of mise per project. The flake retires with the Rust tree.
 - nahida's correctness now depends on pi-agent-core's session format and API.
   Versions are pinned exactly, and upgrades are deliberate.
 - The pack interface becomes the contract that matters. It stays as small as
