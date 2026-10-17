@@ -6,4 +6,5 @@ record supersedes them.
 
 | ADR | Status |
 | --- | --- |
-| [0001 adopt a statically composed, event-sourced harness spine](0001-adopt-a-statically-composed-event-sourced-harness-spine.md) | Accepted |
+| [0001 adopt a statically composed, event-sourced harness spine](0001-adopt-a-statically-composed-event-sourced-harness-spine.md) | Superseded by 0002 |
+| [0002 rebuild nahida as a pi-backed, pack-composed deep-work harness](0002-rebuild-nahida-as-a-pi-backed-deep-work-harness.md) | Accepted |

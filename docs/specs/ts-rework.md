@@ -1,0 +1,99 @@
+# Spec: nahida TypeScript rework
+
+Implements [ADR-0002](../decisions/0002-rebuild-nahida-as-a-pi-backed-deep-work-harness.md).
+
+## Outcome
+
+`nahida` is a terminal agent for writing, reading and science work. It is
+built on `pi-ai` and `pi-agent-core`. Its capabilities come from packs that a
+profile composes.
+
+## Assumptions (proposals, not owner decisions)
+
+- Runtime is **Bun** with TypeScript, matching luna. Tools are pinned in
+  `.mise.toml`, and `make` stays the task runner.
+- Profiles live in `~/.config/nahida/profiles/<name>.toml`. A built-in
+  `default` profile loads all three packs.
+- Pack work files live in one confined workspace directory per session,
+  defaulting to the current directory, and every model-supplied path is
+  resolved inside it.
+- pi package versions are pinned to whatever is current at the start of
+  slice 1, verified against npm and the installed package's own docs, not
+  `refs/coding-agents/pi` (stale at 0.87.1).
+
+## Acceptance criteria
+
+Each criterion names its evidence. Wherever the agent is involved, "test" means
+an automated test against a fake or faux provider with no network.
+
+**Core and migration**
+
+1. The commit tagged `rust-final` builds with `make validate` from a clean
+   checkout. Evidence: the gate run on the tag.
+2. `main` contains no `Cargo.toml`, `crates/`, or Rust tutorial pages.
+   `make check` runs TypeScript typecheck, lint and tests. Evidence: tree
+   listing and gate output.
+3. `nahida "<prompt>"` streams an answer from the configured provider. Without
+   credentials it exits non-zero with a message that names the missing
+   variable. Evidence: test for the error path, manual run for the happy path.
+4. `--json` emits one JSON event per line, and every line parses with `jq`.
+   Evidence: test.
+
+**Packs and profiles**
+
+5. A pack is a module that exports `{ id, tools?, prompt?, commands?,
+   activate(ctx) → dispose }`. Loading a profile with two packs that register
+   the same tool name fails at boot and names both packs. Evidence: test.
+6. `--profile writing` exposes only the writing pack's tools to the model.
+   Evidence: test asserting the tool list in the recorded request.
+7. `--describe` prints the resolved profile: model id, packs in order, tool
+   names, prompt fragment sources, approval policy, session dir. It contains
+   no API key, even when one is set in the environment. Evidence: test that
+   sets a sentinel key and greps the output for it.
+8. Every pack's disposer runs on normal exit and on SIGINT. Evidence: test with
+   a pack that records disposal.
+
+**Sessions**
+
+9. `--continue` resumes the last session in that workspace. The resumed
+   model request equals what replaying the session log produces. Evidence:
+   test comparing recorded request bodies before and after restart.
+10. Context a pack adds (for example, an extracted PDF passage) appears in the
+    session log before the request that uses it. Evidence: test.
+
+**Packs**
+
+11. **writing**: tools to read, create and edit Markdown drafts in the
+    workspace. Edits are targeted replacements that fail when the target text
+    is missing or ambiguous, and a path outside the workspace returns a tool
+    error, not an exception. Evidence: tests for missing, ambiguous and escaped
+    paths.
+12. **reading**: tools that turn a local PDF/EPUB or a URL into text with
+    location anchors (page or section), and that record a highlight or note
+    with its anchor to a Markdown file in the workspace. Evidence: tests on a
+    fixture PDF and fixture HTML. EPUB can be deferred if the slice runs long,
+    but it must be listed as deferred.
+13. **science**: a paper-search tool over at least one open API (arXiv or
+    Semantic Scholar) that returns title, authors, year, id and abstract, plus
+    a `compute` tool that runs a Python snippet via `uv run` in the workspace
+    with a timeout and requires approval. Evidence: test with a recorded API
+    fixture, test that a denied approval executes nothing, and test that the
+    timeout kills a looping script.
+
+## Out of scope
+
+Web or Telegram surfaces, hot reload, remote sessions, a pack registry or
+installer, sharing packs with luna, and writing into apricot.
+
+## Slices
+
+Each slice ends green on `make check` and is one PR.
+
+1. Tag `rust-final`. Scaffold the Bun/TS project, wire the pi-ai and
+   pi-agent-core CLI, and add `--json`. Covers criteria 1–4.
+2. Pack and profile loader, `--describe`, disposal. Covers 5–8.
+3. Sessions on the pi-agent-core store, plus `--continue`. Covers 9–10.
+4. writing pack. Covers 11.
+5. reading pack. Covers 12.
+6. science pack. Covers 13.
+7. Rewrite `AGENTS.md` and README, and remove the tutorial. Re-check 2.
