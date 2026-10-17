@@ -20,9 +20,10 @@ profile composes.
 - Pack work files live in one confined workspace directory per session,
   defaulting to the current directory, and every model-supplied path is
   resolved inside it.
-- pi package versions are pinned to whatever is current at the start of
-  slice 1, verified against npm and the installed package's own docs, not
-  `refs/coding-agents/pi` (stale at 0.87.1).
+- pi package versions are pinned exactly to the newest release that passes
+  the owner's 7-day install cooldown (1.1.0 as of 2026-10-17). The project
+  `bunfig.toml` enforces that cooldown. APIs are verified against the installed
+  package's own docs, not `refs/coding-agents/pi` (stale at 0.87.1).
 
 ## Acceptance criteria
 
