@@ -10,13 +10,17 @@ Current slice and acceptance criteria: [docs/specs/ts-rework.md](docs/specs/ts-r
 
 | Path | What it is |
 | --- | --- |
-| `src/cli.ts` | The `nahida` entry point: argument parsing, provider and model selection, the agent run, `--json` output |
+| `src/cli.ts` | The `nahida` entry point: flags, profile and model selection, the agent run, `--json`, `--describe` |
+| `src/pack.ts` | The pack contract, pack selection, the tool-name collision check, disposal |
+| `src/profile.ts` | Profile TOML loading (`Bun.TOML`) |
+| `src/pi-config.ts` | pi's agent dir, `ModelRuntime` and `SettingsManager` from `pi-coding-agent` |
+| `src/packs/` | Built-in packs. `echo` only, to exercise the loader |
 | `src/cli.test.ts` | CLI tests against the faux provider (no network) |
 | `src/prompt.md` | The system prompt, beside the code that loads it |
 | `docs/decisions/`, `docs/specs/` | Decisions and the slice spec |
 
-Packs, profiles, sessions and the REPL come in later slices. Do not add them
-ahead of the spec.
+Sessions, the REPL and the writing, reading and science packs come in later
+slices. Do not add them ahead of the spec.
 
 ## Rules for agents
 
@@ -24,8 +28,9 @@ ahead of the spec.
    persistence come from `pi-ai` and `pi-agent-core`. Read the installed
    packages' own docs under `node_modules/@earendil-works/*` (README and
    `dist/*.d.ts`). Do not rely on memory or on `refs/`.
-2. **Pin pi exactly.** `@earendil-works/pi-ai` and `pi-agent-core` have no `^`
-   or `~`. Upgrades are deliberate, with the spec's criteria re-checked.
+2. **Pin pi exactly.** `@earendil-works/pi-ai`, `pi-agent-core` and
+   `pi-coding-agent` have no `^` or `~`. Upgrades are deliberate, with the
+   spec's criteria re-checked.
 3. **A tool failure is a result, never an exception.** Return an error result the
    model can act on. Throwing ends the run.
 4. **Every model-supplied path resolves inside the workspace.** A path from the
@@ -37,7 +42,8 @@ ahead of the spec.
 7. **Prompt text lives in `.md` files beside the code** that loads it.
 8. **Tests run against a fake provider.** A test that needs the network is not a
    unit test. Every test that touches the model uses the faux provider or an
-   injected `streamFn`.
+   injected `streamFn`. Tests point `PI_CODING_AGENT_DIR` and
+   `NAHIDA_CONFIG_DIR` at a fixture under `.tmp/`, never at a real agent dir.
 9. **Ask before removing functionality that looks intentional.**
 
 ## Commands
