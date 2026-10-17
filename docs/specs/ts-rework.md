@@ -1,6 +1,6 @@
 # Spec: nahida TypeScript rework
 
-Implements [ADR-0002](../decisions/0002-rebuild-nahida-as-a-pi-backed-deep-work-harness.md).
+Implements [ADR-0003](../decisions/0003-rebuild-nahida-as-a-pi-backed-deep-work-harness.md).
 
 ## Outcome
 
@@ -33,8 +33,8 @@ an automated test against a fake or faux provider with no network.
 
 **Core and migration**
 
-1. The commit tagged `rust-final` builds with `nix develop -c make validate`
-   from a clean checkout, using the flake it still contains. Evidence: the gate run on the tag.
+1. The commit tagged `rust-final` (cd51c2b) builds with `nix develop -c make
+   validate`, exit 0 (run 2026-10-17). Evidence: the gate run on the tag.
 2. `main` contains no `Cargo.toml`, `crates/`, `flake.nix`, `flake.lock`, or
    Rust tutorial pages. From a clean clone, `mise install && make check` is the
    whole setup, and `make check` runs TypeScript typecheck, lint and tests. Evidence: tree
@@ -93,7 +93,10 @@ an automated test against a fake or faux provider with no network.
 13. **science**: a paper-search tool over at least one open API (arXiv or
     Semantic Scholar) that returns title, authors, year, id and abstract, plus
     a `compute` tool that runs a Python snippet via `uv run` in the workspace
-    with a timeout and requires approval. Evidence: test with a recorded API
+    with a timeout and requires approval. The subprocess runs without the pi
+    agent dir in reach: a scrubbed environment and a cwd confined to the
+    workspace. If full read isolation is not achievable on macOS, that is
+    documented as a limitation. Evidence: test with a recorded API
     fixture, test that a denied approval executes nothing, and test that the
     timeout kills a looping script.
 

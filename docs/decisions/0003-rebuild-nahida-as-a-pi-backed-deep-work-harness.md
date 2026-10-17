@@ -1,8 +1,8 @@
-# ADR-0002: Rebuild nahida as a pi-backed, pack-composed deep-work harness
+# ADR-0003: Rebuild nahida as a pi-backed, pack-composed deep-work harness
 
 ## Status
 
-Accepted. Supersedes [ADR-0001](0001-adopt-a-statically-composed-event-sourced-harness-spine.md).
+Accepted. Supersedes [ADR-0001](0001-adopt-a-statically-composed-event-sourced-harness-spine.md) and [ADR-0002](0002-bind-replay-and-separate-storage-from-tool-permissions.md).
 
 ## Date
 
@@ -28,6 +28,13 @@ That premise has changed:
   The owner prefers the TypeScript ecosystem for this project.
 - luna already runs a quick Telegram secretary on pi. nahida must not duplicate
   it.
+
+The Rust line did not stop at ADR-0001. PRs #20–#24 continued it with a GLM
+provider, a `nahida-config` crate, and Landlock storage probes. The
+`rust-final` tag marks that last Rust state at cd51c2b. The pi auth research in
+[pi layers and auth](../research/2026-10-10-pi-layers-and-auth.md) motivates
+calling pi's own `AuthStorage` (which locks with `proper-lockfile`) instead of
+re-implementing it.
 
 DeepSeek Harness shows the composition shape worth borrowing. A run is a
 **profile** made of ordered **bundles**. "Model-visible means logged": the
@@ -93,6 +100,9 @@ packs' tools.
   default of mise per project. The flake retires with the Rust tree.
 - nahida's correctness now depends on pi-agent-core's session format and API.
   Versions are pinned exactly, and upgrades are deliberate.
+- pi writes `auth.json` without an atomic rename, and tools that run shell or
+  code can read the agent dir. Later packs must not hand the model unrestricted
+  reads of it.
 - The pack interface becomes the contract that matters. It stays as small as
   the three first packs need. A field no pack uses is not added.
 - The 0-to-hero tutorial no longer describes the code. It is removed rather

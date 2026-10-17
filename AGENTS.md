@@ -3,7 +3,7 @@
 A terminal agent for writing, reading and science work. It is a TypeScript
 project on Bun, built on `@earendil-works/pi-ai` (providers) and
 `@earendil-works/pi-agent-core` (loop, tools, events). Decision record:
-[ADR-0002](docs/decisions/0002-rebuild-nahida-as-a-pi-backed-deep-work-harness.md).
+[ADR-0003](docs/decisions/0003-rebuild-nahida-as-a-pi-backed-deep-work-harness.md).
 Current slice and acceptance criteria: [docs/specs/ts-rework.md](docs/specs/ts-rework.md).
 
 ## Layout

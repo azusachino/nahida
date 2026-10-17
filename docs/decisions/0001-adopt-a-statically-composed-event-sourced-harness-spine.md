@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-0003](0003-rebuild-nahida-as-a-pi-backed-deep-work-harness.md).
 
 ## Date
 
