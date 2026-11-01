@@ -77,6 +77,19 @@ an automated test against a fake or faux provider with no network.
    test comparing recorded request bodies before and after restart.
 10. Context a pack adds (for example, an extracted PDF passage) appears in the
     session log before the request that uses it. Evidence: test.
+10a. Failures and durability, carried over from issue #19 (A5, A6):
+    - A failed or partial stream never executes tool calls and never ends as a
+      successful answer.
+    - Ctrl-C during a request or tool call leaves the log consistent: a later
+      `--continue` neither replays a partial tool call nor repeats its side
+      effects.
+    - A session log with a corrupt tail is refused, with a message, rather than
+      appended to.
+    - A session records its provider/model, and resuming under a different
+      model is either refused or explicitly re-projected, never silent.
+
+    Evidence: tests with scripted faux-provider failures and a truncated log
+    fixture.
 
 **Packs**
 
@@ -109,12 +122,12 @@ installer, sharing packs with luna, and writing into apricot.
 
 Each slice ends green on `make check` and is one PR.
 
-1. Tag `rust-final`. Remove the Rust tree and flake, add `.mise.toml`,
+1. Tag `rust-final` (done: cd51c2b). Remove the Rust tree and flake, add `.mise.toml`,
    scaffold the Bun/TS project, wire the pi-ai and pi-agent-core CLI, and add
    `--json`. Covers criteria 1–4.
 2. Pack and profile loader, pi config reuse, `--describe`, disposal. Covers
    5–8, including 7a.
-3. Sessions on the pi-agent-core store, plus `--continue`. Covers 9–10.
+3. Sessions on the pi-agent-core store, plus `--continue`. Covers 9–10a.
 4. writing pack. Covers 11.
 5. reading pack. Covers 12.
 6. science pack. Covers 13.
