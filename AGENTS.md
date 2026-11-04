@@ -10,7 +10,8 @@ Current slice and acceptance criteria: [docs/specs/ts-rework.md](docs/specs/ts-r
 
 | Path | What it is |
 | --- | --- |
-| `src/cli.ts` | The `nahida` entry point: flags, profile and model selection, the agent run, `--json`, `--describe` |
+| `src/cli.ts` | The `nahida` entry point: flags, profile and model selection, the agent run, `--json`, `--describe`, `--continue` |
+| `src/session.ts` | Pi SessionManager storage, strict continuation validation and the workspace lock |
 | `src/pack.ts` | The pack contract, pack selection, the tool-name collision check, disposal |
 | `src/profile.ts` | Profile TOML loading (`Bun.TOML`) |
 | `src/pi-config.ts` | pi's agent dir, `ModelRuntime` and `SettingsManager` from `pi-coding-agent` |
@@ -19,13 +20,16 @@ Current slice and acceptance criteria: [docs/specs/ts-rework.md](docs/specs/ts-r
 | `src/prompt.md` | The system prompt, beside the code that loads it |
 | `docs/decisions/`, `docs/specs/` | Decisions and the slice spec |
 
-Sessions, the REPL and the writing, reading and science packs come in later
-slices. Do not add them ahead of the spec.
+Slices 1–3 cover the CLI, packs/profiles and sessions. The REPL and the writing,
+reading and science packs come in later slices. Do not add them ahead of the spec.
+For session changes, read [the slice 3 record](docs/plans/slice3-sessions.md) for
+recovery limits and the installed SessionManager API evidence.
 
 ## Rules for agents
 
 1. **Do not reimplement pi.** Providers, the loop, tool execution and session
-   persistence come from `pi-ai` and `pi-agent-core`. Read the installed
+   persistence come from pi: `pi-ai`, `pi-agent-core` and `pi-coding-agent`'s
+   `SessionManager`. Read the installed
    packages' own docs under `node_modules/@earendil-works/*` (README and
    `dist/*.d.ts`). Do not rely on memory or on `refs/`.
 2. **Pin pi exactly.** `@earendil-works/pi-ai`, `pi-agent-core` and
