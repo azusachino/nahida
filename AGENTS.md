@@ -15,13 +15,15 @@ Current slice and acceptance criteria: [docs/specs/ts-rework.md](docs/specs/ts-r
 | `src/pack.ts` | The pack contract, pack selection, the tool-name collision check, disposal |
 | `src/profile.ts` | Profile TOML loading (`Bun.TOML`) |
 | `src/pi-config.ts` | pi's agent dir, `ModelRuntime` and `SettingsManager` from `pi-coding-agent` |
-| `src/packs/` | Built-in packs. `echo` only, to exercise the loader |
+| `src/packs/` | Built-in echo and workspace-bound writing packs |
 | `src/cli.test.ts` | CLI tests against the faux provider (no network) |
 | `src/prompt.md` | The system prompt, beside the code that loads it |
 | `docs/decisions/`, `docs/specs/` | Decisions and the slice spec |
 
-Slices 1–3 cover the CLI, packs/profiles and sessions. The REPL and the writing,
+Slices 1–4 cover the CLI, packs/profiles, sessions and writing drafts. The REPL,
 reading and science packs come in later slices. Do not add them ahead of the spec.
+For writing-tool changes, read [the slice 4 record](docs/plans/slice4-writing.md)
+for the path boundary, profile compatibility and filesystem limits.
 For session changes, read [the slice 3 record](docs/plans/slice3-sessions.md) for
 recovery limits and the installed SessionManager API evidence.
 

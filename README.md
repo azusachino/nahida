@@ -2,8 +2,9 @@
 
 A terminal agent for writing, reading and science work. It is a TypeScript
 project on Bun, built on pi's `pi-ai`, `pi-agent-core` and
-`pi-coding-agent` (for pi's config loaders). Capabilities come from packs that
-a profile composes. Today one harmless pack, `echo`, exercises the loader.
+`pi-coding-agent` (for configuration and session storage). Capabilities come
+from packs that a profile composes. The writing pack works on Markdown drafts;
+the harmless echo pack exercises the loader.
 
 ## Setup
 
@@ -22,6 +23,7 @@ make run ARGS="what does this repo do?"
 make run ARGS="--json what does this repo do?"       # one JSON event per line
 make run ARGS="--continue tell me more"             # append to the last session
 make run ARGS="--continue"                          # retry unfinished input
+make run ARGS="--profile writing draft an outline in drafts/outline.md"
 make run ARGS="--profile pilot what does this repo do?"
 make run ARGS="--describe --profile pilot"           # resolved config, no secrets
 ```
@@ -52,8 +54,7 @@ schemas and approval policy must match the original session.
 Requests are rebuilt from the stored messages. Pack activation can call
 `ctx.addContext(text)` to queue model-visible context, which is recorded after
 pending tool results and before the next request. Unused queued context is
-discarded when the run ends. Failed
-and incomplete responses are recorded as failure metadata, never replayed as
+discarded when the run ends. Failed and incomplete responses are recorded as failure metadata, never replayed as
 answers or executable tool calls. Ctrl-C exits 130 after tool settlement and
 pack disposal; recorded tool results are reused on continuation.
 
@@ -79,13 +80,45 @@ model = "zai-coding-cn/glm-5.3-flash"   # optional, provider/id
 approval = "ask"                        # optional, shown by --describe; not enforced yet
 ```
 
-With no `default.toml`, `default` loads every built-in pack. An unknown pack id,
+With no `default.toml`, `default` loads every built-in pack (echo and writing).
+With no `writing.toml`, the built-in `writing` profile loads only the writing
+pack. A file profile overrides either built-in profile. An unknown pack id,
 an unknown key, or two packs registering the same tool name exits 2 at boot.
+
+Sessions from before the writing pack was added used an echo-only default. To
+continue one, create an `echo-only.toml` profile with `packs = ["echo"]` and run
+`--continue --profile echo-only`. Other model and approval settings must still
+match that session.
 
 A pack is a module with `id`, optional `tools`, optional `prompt` (`{ file,
 text }`, the text imported from a `.md` file) and optional `activate(ctx)`,
 which returns a disposer. Every disposer runs on normal exit and on SIGINT, in
 reverse activation order.
+
+## Writing drafts
+
+The writing pack provides three tools:
+
+| Tool | Behavior |
+| --- | --- |
+| `read_draft(path)` | Read a UTF-8 Markdown file. |
+| `create_draft(path, text)` | Create a new draft and missing parent directories; refuse overwrite. |
+| `edit_draft(path, oldText, newText)` | Replace exactly one literal occurrence; refuse empty, missing or ambiguous targets. |
+
+Paths may be relative or absolute but must stay inside the current workspace
+and end in `.md` or `.markdown`. Symlinks, hard-linked files, non-regular files
+and invalid UTF-8 are refused. Edits preserve surrounding text, line endings
+and any UTF-8 byte order mark. Failures return tool errors so the model can
+correct its request.
+
+These tools run with the user's filesystem permissions. The path checks assume
+other processes do not replace ancestor directories while a tool is running;
+they do not provide an OS sandbox or rollback after disk errors or crashes.
+The profile's approval field remains descriptive; writing tools execute
+without an interactive approval prompt. Use a workspace containing drafts you
+intend the agent to edit.
+
+See [the slice 4 record](docs/plans/slice4-writing.md) for acceptance and limits.
 
 ## Layout
 
@@ -95,7 +128,7 @@ src/pack.ts             pack contract, selection, tool collision check, disposal
 src/profile.ts          profile TOML loading (Bun.TOML)
 src/session.ts          pi session storage, strict resume checks and workspace lock
 src/pi-config.ts        pi agent dir, ModelRuntime and SettingsManager, model refs
-src/packs/              built-in packs; echo is the only one so far
+src/packs/              built-in echo and writing packs; writing tools bind the workspace
 src/prompt.md           the base system prompt
 src/cli.test.ts         tests against a fixture agent dir and pi's faux provider
 docs/                   decisions and the current spec

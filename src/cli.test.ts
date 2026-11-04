@@ -444,6 +444,146 @@ function requestFromLog(path: string) {
   return normalizeContext({ messages });
 }
 
+describe("writing pack", () => {
+  test("writing-only CLI journey creates, reads and edits a draft, recovers from a tool error and resumes", async () => {
+    const { env, cwd } = fixture();
+    const path = join(cwd, "drafts/story.md");
+    const h = harness(env, {
+      responses: [
+        fauxAssistantMessage(
+          fauxToolCall("create_draft", {
+            path: "drafts/story.md",
+            text: "# 春\nAn early draft.\n",
+          }),
+          { stopReason: "toolUse" },
+        ),
+        () => {
+          expect(readFileSync(path, "utf8")).toBe("# 春\nAn early draft.\n");
+          return fauxAssistantMessage(
+            fauxToolCall("read_draft", { path: "drafts/story.md" }),
+            { stopReason: "toolUse" },
+          );
+        },
+        fauxAssistantMessage(
+          fauxToolCall("edit_draft", {
+            path: "drafts/story.md",
+            oldText: "absent passage",
+            newText: "unsafe",
+          }),
+          { stopReason: "toolUse" },
+        ),
+        () => {
+          expect(readFileSync(path, "utf8")).toBe("# 春\nAn early draft.\n");
+          const messages = replay(sessionFile(h.io));
+          expect(messages.at(-1)?.role).toBe("toolResult");
+          const last = messages.at(-1);
+          expect(last?.role === "toolResult" && last.isError).toBe(true);
+          return fauxAssistantMessage(
+            fauxToolCall("edit_draft", {
+              path: "drafts/story.md",
+              oldText: "An early",
+              newText: "A finished",
+            }),
+            { stopReason: "toolUse" },
+          );
+        },
+        fauxAssistantMessage("Draft saved."),
+      ],
+    });
+    expect(await main(["--profile", "writing", "write a draft"], h.io)).toBe(0);
+    expect(readFileSync(path)).toEqual(
+      Buffer.from("# 春\nA finished draft.\n"),
+    );
+    const first = h.calls[0]?.context as {
+      messages: { toolsAdded?: { name: string }[] }[];
+    };
+    expect(first.messages[0]?.toolsAdded?.map((tool) => tool.name)).toEqual([
+      "read_draft",
+      "create_draft",
+      "edit_draft",
+    ]);
+    expect(h.stdout.join("")).toContain("Draft saved.");
+    const next = harness(env, {
+      responses: [fauxAssistantMessage("Remembered the draft.")],
+    });
+    expect(
+      await main(
+        ["--continue", "--profile", "writing", "what did you write?"],
+        next.io,
+      ),
+    ).toBe(0);
+    expect(JSON.stringify(next.calls)).toContain("# 春\\nAn early draft.");
+    expect(sessionFile(next.io)).toBe(sessionFile(h.io));
+  });
+
+  test("escaped paths become model-visible tool errors and never touch the outside draft", async () => {
+    const { env, cwd } = fixture();
+    const outside = join(cwd, "../outside.md");
+    writeFileSync(outside, "outside sentinel");
+    const h = harness(env, {
+      responses: [
+        fauxAssistantMessage(
+          fauxToolCall("edit_draft", {
+            path: "../outside.md",
+            oldText: "outside sentinel",
+            newText: "changed",
+          }),
+          { stopReason: "toolUse" },
+        ),
+        () => {
+          const last = replay(sessionFile(h.io)).at(-1);
+          expect(last?.role === "toolResult" && last.isError).toBe(true);
+          expect(JSON.stringify(last)).toContain("inside the workspace");
+          return fauxAssistantMessage("That path is outside the workspace.");
+        },
+      ],
+    });
+    expect(await main(["--profile", "writing", "edit it"], h.io)).toBe(0);
+    expect(readFileSync(outside, "utf8")).toBe("outside sentinel");
+  });
+
+  test("echo-only sessions can keep their original configuration after the default gains writing", async () => {
+    const { env } = fixture({
+      profiles: { "echo-only": 'packs = ["echo"]\n' },
+    });
+    const previous = harness(env, {
+      packs: { echo: echoPack },
+      responses: [fauxAssistantMessage("old session")],
+    });
+    expect(await main(["hi"], previous.io)).toBe(0);
+    const changed = harness(env);
+    expect(await main(["--continue", "more"], changed.io)).toBe(2);
+    expect(changed.stderr.join("")).toContain("configuration changed");
+    const compatible = harness(env, {
+      responses: [fauxAssistantMessage("continued")],
+    });
+    expect(
+      await main(
+        ["--continue", "--profile", "echo-only", "more"],
+        compatible.io,
+      ),
+    ).toBe(0);
+  });
+
+  test("--describe resolves the built-in writing-only profile", async () => {
+    const { env } = fixture();
+    const h = harness(env);
+    expect(await main(["--describe", "--profile", "writing"], h.io)).toBe(0);
+    expect(h.stdout.join("")).toContain("packs: writing\n");
+    expect(h.stdout.join("")).toContain(
+      "tools: read_draft, create_draft, edit_draft\n",
+    );
+    expect(h.calls).toHaveLength(0);
+  });
+
+  test("an explicit profile overrides the built-in writing profile", async () => {
+    const { env } = fixture({ profiles: { writing: 'packs = ["echo"]\n' } });
+    const h = harness(env);
+    expect(await main(["--describe", "--profile", "writing"], h.io)).toBe(0);
+    expect(h.stdout.join("")).toContain("tools: echo\n");
+  });
+});
+
 describe("sessions", () => {
   test("restart replays prompt, tools, reasoning signatures and tool results exactly", async () => {
     const { env } = fixture();
