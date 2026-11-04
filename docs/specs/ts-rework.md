@@ -130,7 +130,8 @@ Each slice ends green on `make check` and is one PR.
 3. Sessions on pi-coding-agent's `SessionManager` store, plus `--continue`.
    Covers 9–10a. Implementation and verification:
    [slice 3 record](../plans/slice3-sessions.md).
-4. writing pack. Covers 11.
+4. writing pack. Covers 11. Implementation and verification:
+   [slice 4 record](../plans/slice4-writing.md).
 5. reading pack. Covers 12.
 6. science pack. Covers 13.
 7. Rewrite `AGENTS.md` and README, and remove the tutorial. Re-check 2.

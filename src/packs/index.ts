@@ -1,7 +1,8 @@
 import type { PackRegistry } from "../pack";
 import { echoPack } from "./echo";
+import { writingPack } from "./writing";
 
-/** Packs shipped with nahida, keyed by pack id. */
-export const builtinPacks: PackRegistry = {
-  echo: echoPack,
-};
+/** Fresh tools bind the host-selected workspace for this run. */
+export function builtinPacks(cwd: string): PackRegistry {
+  return { echo: echoPack, writing: writingPack(cwd) };
+}

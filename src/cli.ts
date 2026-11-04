@@ -52,11 +52,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
   }
 
   try {
-    const registry = io.packs ?? builtinPacks;
+    const cwd = realpathSync(io.cwd ?? process.cwd());
+    const registry = io.packs ?? builtinPacks(cwd);
     const profile = await loadProfile(values.profile, io.env, registry);
     const packs = selectPacks(profile.packs, registry, profile.name);
     const tools = collectTools(packs);
-    const cwd = realpathSync(io.cwd ?? process.cwd());
     const sessions = sessionDir(io.env, cwd);
 
     const agentDir = piAgentDir(io.env);
