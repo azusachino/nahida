@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -24,6 +25,8 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { type Io, main } from "./cli";
 import type { Pack, PackRegistry, PackTool } from "./pack";
 import { echoPack, echoTool } from "./packs/echo";
+import { readingPack } from "./packs/reading";
+import { writingPack } from "./packs/writing";
 import { piAgentDir } from "./pi-config";
 import { openSession, sessionDir } from "./session";
 
@@ -443,6 +446,141 @@ function requestFromLog(path: string) {
   );
   return normalizeContext({ messages });
 }
+
+describe("reading pack", () => {
+  test("PDF and article passages are logged before use, anchored notes are saved, and continuation replays them", async () => {
+    const { env, cwd } = fixture();
+    copyFileSync(
+      join(import.meta.dir, "packs/reading/fixtures/two-pages.pdf"),
+      join(cwd, "paper.pdf"),
+    );
+    const html = readFileSync(
+      join(import.meta.dir, "packs/reading/fixtures/article.html"),
+      "utf8",
+    );
+    const pack = () => readingPack(cwd, { readHtml: async () => html });
+    const h = harness(env, {
+      packs: { reading: pack() },
+      responses: [
+        fauxAssistantMessage(fauxToolCall("read_pdf", { path: "paper.pdf" }), {
+          stopReason: "toolUse",
+        }),
+        () => {
+          expect(h.calls[1]?.context).toEqual(
+            requestFromLog(sessionFile(h.io)),
+          );
+          expect(JSON.stringify(h.calls[1]?.context)).toContain(
+            "First page: anchored evidence.",
+          );
+          return fauxAssistantMessage(
+            fauxToolCall("record_note", {
+              path: "notes.md",
+              source: "paper.pdf",
+              anchor: "page:2",
+              highlight: "another passage",
+              note: "A PDF note.",
+            }),
+            { stopReason: "toolUse" },
+          );
+        },
+        fauxAssistantMessage(
+          fauxToolCall("read_article", {
+            url: "https://article.example/story",
+          }),
+          { stopReason: "toolUse" },
+        ),
+        () => {
+          expect(h.calls[3]?.context).toEqual(
+            requestFromLog(sessionFile(h.io)),
+          );
+          expect(JSON.stringify(h.calls[3]?.context)).toContain("section:2");
+          return fauxAssistantMessage(
+            fauxToolCall("record_note", {
+              path: "notes.md",
+              source: "https://article.example/story",
+              anchor: "section:2",
+              highlight: "日本語",
+              note: "An article note.",
+            }),
+            { stopReason: "toolUse" },
+          );
+        },
+        fauxAssistantMessage("Both notes saved."),
+      ],
+    });
+    expect(
+      await main(
+        ["--json", "--profile", "reading", "read and take notes"],
+        h.io,
+      ),
+    ).toBe(0);
+    const first = h.calls[0]?.context as {
+      messages: { toolsAdded?: { name: string }[] }[];
+    };
+    expect(first.messages[0]?.toolsAdded?.map((tool) => tool.name)).toEqual([
+      "read_pdf",
+      "read_article",
+      "record_note",
+    ]);
+    const notes = readFileSync(join(cwd, "notes.md"), "utf8");
+    expect(notes).toContain("Anchor: page:2\n\n> another passage");
+    expect(notes).toContain("Anchor: section:2\n\n> 日本語");
+    const events = h.stdout
+      .join("")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(events.at(-1)?.type).toBe("agent_end");
+    const next = harness(env, {
+      packs: { reading: pack() },
+      responses: [fauxAssistantMessage("I remember both sources.")],
+    });
+    expect(
+      await main(
+        ["--continue", "--profile", "reading", "recall the sources"],
+        next.io,
+      ),
+    ).toBe(0);
+    expect(JSON.stringify(next.calls)).toContain(
+      "First page: anchored evidence.",
+    );
+    expect(JSON.stringify(next.calls)).toContain("An article note.");
+    expect(readFileSync(join(cwd, "notes.md"), "utf8")).toBe(notes);
+  });
+
+  test("built-in reading profile describes only reading tools", async () => {
+    const { env } = fixture();
+    const h = harness(env);
+    expect(await main(["--describe", "--profile", "reading"], h.io)).toBe(0);
+    expect(h.stdout.join("")).toContain("packs: reading\n");
+    expect(h.stdout.join("")).toContain(
+      "tools: read_pdf, read_article, record_note\n",
+    );
+    expect(h.calls).toHaveLength(0);
+  });
+
+  test("a prior echo/writing session continues under an explicit matching profile", async () => {
+    const { env, cwd } = fixture({
+      profiles: { "previous-default": 'packs = ["echo", "writing"]\n' },
+    });
+    const previous = harness(env, {
+      packs: { echo: echoPack, writing: writingPack(cwd) },
+      responses: [fauxAssistantMessage("old session")],
+    });
+    expect(await main(["hi"], previous.io)).toBe(0);
+    const changed = harness(env);
+    expect(await main(["--continue", "more"], changed.io)).toBe(2);
+    const compatible = harness(env, {
+      responses: [fauxAssistantMessage("continued")],
+    });
+    expect(
+      await main(
+        ["--continue", "--profile", "previous-default", "more"],
+        compatible.io,
+      ),
+    ).toBe(0);
+  });
+});
 
 describe("writing pack", () => {
   test("writing-only CLI journey creates, reads and edits a draft, recovers from a tool error and resumes", async () => {

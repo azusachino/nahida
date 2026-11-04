@@ -1,28 +1,8 @@
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  ftruncateSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-  writeSync,
-} from "node:fs";
-import {
-  dirname,
-  extname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { ftruncateSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type { Pack } from "../../pack";
+import { workspace } from "../../workspace";
 import prompt from "./prompt.md" with { type: "text" };
 
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -57,78 +37,10 @@ function result(action: () => string): AgentToolResult {
 
 /** Each run owns its workspace binding; tool calls cannot choose or mutate it. */
 export function writingPack(cwd: string): Pack {
-  const root = realpathSync(cwd);
-
-  function draftPath(input: string, createParents = false): string {
-    const path = resolve(root, input);
-    const local = relative(root, path);
-    if (
-      !local ||
-      local === ".." ||
-      local.startsWith(`..${sep}`) ||
-      isAbsolute(local)
-    ) {
-      throw new Error("draft path must be inside the workspace");
-    }
-    if (![".md", ".markdown"].includes(extname(path).toLowerCase())) {
-      throw new Error("draft path must end in .md or .markdown");
-    }
-    let parent = root;
-    for (const part of relative(root, dirname(path))
-      .split(sep)
-      .filter(Boolean)) {
-      parent = join(parent, part);
-      if (createParents) {
-        try {
-          mkdirSync(parent);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        }
-      }
-      const stat = lstatSync(parent);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) {
-        throw new Error(
-          "draft parent must be a real workspace directory; symlinks are not allowed",
-        );
-      }
-    }
-    return path;
-  }
-
-  function withDraft(
-    path: string,
-    writable: boolean,
-    action: (fd: number) => string,
-  ): string {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.nlink !== 1) {
-      throw new Error(
-        "draft must be a regular file with one link; symlinks and hard links are not allowed",
-      );
-    }
-    const fd = openSync(
-      path,
-      (writable ? constants.O_RDWR : constants.O_RDONLY) |
-        constants.O_NOFOLLOW |
-        constants.O_NONBLOCK,
-    );
-    try {
-      const opened = fstatSync(fd);
-      if (
-        !opened.isFile() ||
-        opened.nlink !== 1 ||
-        opened.dev !== stat.dev ||
-        opened.ino !== stat.ino
-      ) {
-        throw new Error(
-          "draft changed while opening; retry after checking the workspace",
-        );
-      }
-      return action(fd);
-    } finally {
-      closeSync(fd);
-    }
-  }
+  const files = workspace(cwd);
+  const withDraft = files.withFile;
+  const draftPath = (input: string, createParents = false) =>
+    files.path(input, [".md", ".markdown"], createParents);
 
   const readTool: AgentTool<typeof pathParameters> = {
     name: "read_draft",

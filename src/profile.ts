@@ -24,8 +24,8 @@ export function profilesDir(env: Record<string, string | undefined>): string {
 
 /**
  * Reads `<profiles>/<name>.toml`. With no file, `default` is built in and loads
- * every pack in the registry. Built-in `writing` selects the writing pack only;
- * any other missing name is a boot error.
+ * every pack in the registry. Built-in `writing` and `reading` each select their
+ * own pack only; any other missing name is a boot error.
  */
 export async function loadProfile(
   name: string,
@@ -40,8 +40,11 @@ export async function loadProfile(
     if (name === "default") {
       return { name, packs: Object.keys(registry), approval: "ask" };
     }
-    if (name === "writing" && Object.hasOwn(registry, "writing")) {
-      return { name, packs: ["writing"], approval: "ask" };
+    if (
+      (name === "writing" || name === "reading") &&
+      Object.hasOwn(registry, name)
+    ) {
+      return { name, packs: [name], approval: "ask" };
     }
     throw new BootError(`profile "${name}" not found at ${file}`);
   }
