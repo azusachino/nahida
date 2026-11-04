@@ -12,6 +12,8 @@ export class BootError extends Error {}
 
 export interface PackContext {
   cwd: string;
+  /** Queue model-visible context for persistence before the next request (for example, an extracted passage). */
+  addContext: (text: string) => void;
 }
 
 /** Undoes whatever a pack set up in `activate`. */

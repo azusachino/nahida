@@ -127,7 +127,9 @@ Each slice ends green on `make check` and is one PR.
    `--json`. Covers criteria 1–4.
 2. Pack and profile loader, pi config reuse, `--describe`, disposal. Covers
    5–8, including 7a.
-3. Sessions on the pi-agent-core store, plus `--continue`. Covers 9–10a.
+3. Sessions on pi-coding-agent's `SessionManager` store, plus `--continue`.
+   Covers 9–10a. Implementation and verification:
+   [slice 3 record](../plans/slice3-sessions.md).
 4. writing pack. Covers 11.
 5. reading pack. Covers 12.
 6. science pack. Covers 13.
