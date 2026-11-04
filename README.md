@@ -3,8 +3,9 @@
 A terminal agent for writing, reading and science work. It is a TypeScript
 project on Bun, built on pi's `pi-ai`, `pi-agent-core` and
 `pi-coding-agent` (for configuration and session storage). Capabilities come
-from packs that a profile composes. The writing pack works on Markdown drafts;
-the harmless echo pack exercises the loader.
+from packs that a profile composes. Writing tools work on Markdown drafts;
+reading tools extract PDFs and articles into anchored notes. The harmless echo
+pack exercises the loader.
 
 ## Setup
 
@@ -24,6 +25,7 @@ make run ARGS="--json what does this repo do?"       # one JSON event per line
 make run ARGS="--continue tell me more"             # append to the last session
 make run ARGS="--continue"                          # retry unfinished input
 make run ARGS="--profile writing draft an outline in drafts/outline.md"
+make run ARGS="--profile reading read paper.pdf and save a note in notes/paper.md"
 make run ARGS="--profile pilot what does this repo do?"
 make run ARGS="--describe --profile pilot"           # resolved config, no secrets
 ```
@@ -54,8 +56,8 @@ schemas and approval policy must match the original session.
 Requests are rebuilt from the stored messages. Pack activation can call
 `ctx.addContext(text)` to queue model-visible context, which is recorded after
 pending tool results and before the next request. Unused queued context is
-discarded when the run ends. Failed and incomplete responses are recorded as failure metadata, never replayed as
-answers or executable tool calls. Ctrl-C exits 130 after tool settlement and
+discarded when the run ends. Failed and incomplete responses are recorded as
+failure metadata, never replayed as answers or executable tool calls. Ctrl-C exits 130 after tool settlement and
 pack disposal; recorded tool results are reused on continuation.
 
 A corrupt or truncated log is refused without modification. A crash leaving a
@@ -80,15 +82,16 @@ model = "zai-coding-cn/glm-5.3-flash"   # optional, provider/id
 approval = "ask"                        # optional, shown by --describe; not enforced yet
 ```
 
-With no `default.toml`, `default` loads every built-in pack (echo and writing).
-With no `writing.toml`, the built-in `writing` profile loads only the writing
-pack. A file profile overrides either built-in profile. An unknown pack id,
+With no `default.toml`, `default` loads every built-in pack (echo, writing and
+reading). Built-in `writing` and `reading` profiles each select only that pack.
+A file profile overrides a built-in profile. An unknown pack id,
 an unknown key, or two packs registering the same tool name exits 2 at boot.
 
 Sessions from before the writing pack was added used an echo-only default. To
 continue one, create an `echo-only.toml` profile with `packs = ["echo"]` and run
 `--continue --profile echo-only`. Other model and approval settings must still
-match that session.
+match that session. Sessions from the later echo/writing default can similarly
+use a file profile with `packs = ["echo", "writing"]` after reading is added.
 
 A pack is a module with `id`, optional `tools`, optional `prompt` (`{ file,
 text }`, the text imported from a `.md` file) and optional `activate(ctx)`,
@@ -120,6 +123,43 @@ intend the agent to edit.
 
 See [the slice 4 record](docs/plans/slice4-writing.md) for acceptance and limits.
 
+## Reading and notes
+
+Use `--profile reading` for these tools:
+
+| Tool | Behavior |
+| --- | --- |
+| `read_pdf(path)` | Extract a workspace PDF into `page:1`, `page:2`, … passages. |
+| `read_article(url)` | Extract a public HTTPS HTML article into `section:1`, `section:2`, … passages. |
+| `record_note(path, source, anchor, highlight?, note?)` | Append an anchored highlight and/or note to workspace Markdown. |
+
+Extraction returns the source, content SHA-256 revision and anchored text.
+`record_note` requires a source and anchor extracted in the current run; copy
+those fields from the extraction result. Highlights must match the passage
+exactly. Notes include source, revision, anchor, quote and your commentary.
+Re-extract a source after restarting before recording more notes. Earlier
+extraction results remain in session history.
+
+PDFs are limited to 10 MiB and 200 pages, and extracted text to 200,000
+characters. PDF parsing uses the pinned `unpdf`/PDF.js build with external font
+and character-map loading disabled. These limits do not provide an isolated
+parser or a strict CPU deadline for malformed PDFs. EPUB and OCR are deferred;
+scanned PDFs without extractable text return an error.
+
+Articles must be credential-free public HTTPS on port 443. All resolved
+addresses must be public; the request connects to a vetted IP while retaining
+the original TLS hostname. Redirects, compressed responses and non-HTML content
+are refused. The request has a 20-second deadline and a 2 MiB body limit; HTML
+must be UTF-8. Scripts and subresources are never loaded. Extraction removes
+common page chrome and hidden elements but does not run a browser or implement
+full CSS visibility or article-quality scoring.
+
+Local PDFs and notes use the same workspace, symlink and hard-link protections
+as drafts. Notes append without replacing prior text and have the same
+filesystem concurrency and crash limits. Remote PDFs, authenticated sites and
+JavaScript-rendered articles are outside this slice. See
+[the slice 5 record](docs/plans/slice5-reading.md) for evidence and deferred work.
+
 ## Layout
 
 ```text
@@ -128,7 +168,8 @@ src/pack.ts             pack contract, selection, tool collision check, disposal
 src/profile.ts          profile TOML loading (Bun.TOML)
 src/session.ts          pi session storage, strict resume checks and workspace lock
 src/pi-config.ts        pi agent dir, ModelRuntime and SettingsManager, model refs
-src/packs/              built-in echo and writing packs; writing tools bind the workspace
+src/packs/              built-in echo, writing and reading packs
+src/workspace.ts        shared path and file-descriptor protections
 src/prompt.md           the base system prompt
 src/cli.test.ts         tests against a fixture agent dir and pi's faux provider
 docs/                   decisions and the current spec

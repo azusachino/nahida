@@ -132,6 +132,8 @@ Each slice ends green on `make check` and is one PR.
    [slice 3 record](../plans/slice3-sessions.md).
 4. writing pack. Covers 11. Implementation and verification:
    [slice 4 record](../plans/slice4-writing.md).
-5. reading pack. Covers 12.
+5. reading pack. Covers 12 for local PDFs and HTML articles; EPUB explicitly
+   deferred. Implementation and verification:
+   [slice 5 record](../plans/slice5-reading.md).
 6. science pack. Covers 13.
 7. Rewrite `AGENTS.md` and README, and remove the tutorial. Re-check 2.
