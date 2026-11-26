@@ -5,6 +5,8 @@ project on Bun, built on `@earendil-works/pi-ai` (providers) and
 `@earendil-works/pi-agent-core` (loop, tools, events). Decision record:
 [ADR-0003](docs/decisions/0003-rebuild-nahida-as-a-pi-backed-deep-work-harness.md).
 Current slice and acceptance criteria: [docs/specs/ts-rework.md](docs/specs/ts-rework.md).
+One unattended round of work, and what "done" means for it:
+[docs/plans/agent-loop.md](docs/plans/agent-loop.md).
 
 ## Layout
 
